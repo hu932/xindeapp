@@ -50,6 +50,8 @@ class LoginActivity : AppCompatActivity() {
                     TokenManager.saveToken(response.data.token)
                     TokenManager.saveUsername(username)
                     TokenManager.saveUserLevel(response.data.userLevel)
+                    getSharedPreferences("task_config", MODE_PRIVATE)
+                        .edit().putString("saved_password", password).apply()
                     Toast.makeText(this@LoginActivity, "登录成功", Toast.LENGTH_SHORT).show()
                     startMain()
                 } else {

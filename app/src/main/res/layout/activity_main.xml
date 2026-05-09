@@ -191,7 +191,7 @@
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
                             android:layout_marginStart="4dp"
-                            android:text="测试接口"
+                            android:text="延时设置"
                             android:textSize="13sp" />
                     </LinearLayout>
                 </LinearLayout>

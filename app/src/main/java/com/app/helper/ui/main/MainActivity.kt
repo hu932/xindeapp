@@ -48,7 +48,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnTestApi.setOnClickListener {
-            Toast.makeText(this, "悬浮窗中点击【一键做任务】开始", Toast.LENGTH_SHORT).show()
+            showDelayConfigDialog()
         }
 
         binding.btnStartAuto.setOnClickListener {
@@ -114,6 +114,39 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         updateFpDisplay()
         binding.tvStatus.text = if (TaskService.isRunning) "状态: 服务运行中(悬浮窗)" else "状态: 服务未启动"
+    }
+
+    private fun showDelayConfigDialog() {
+        val prefs = getSharedPreferences("task_config", MODE_PRIVATE)
+        val curMin = prefs.getInt("delay_min", 3)
+        val curMax = prefs.getInt("delay_max", 8)
+
+        val view = layoutInflater.inflate(R.layout.dialog_delay, null)
+        val etMin = view.findViewById<android.widget.EditText>(R.id.et_delay_min)
+        val etMax = view.findViewById<android.widget.EditText>(R.id.et_delay_max)
+        etMin.setText(curMin.toString())
+        etMax.setText(curMax.toString())
+
+        AlertDialog.Builder(this)
+            .setTitle("设置随机延时(秒)")
+            .setView(view)
+            .setPositiveButton("确定") { _, _ ->
+                val min = etMin.text.toString().toIntOrNull() ?: 3
+                val max = etMax.text.toString().toIntOrNull() ?: 8
+                prefs.edit().putInt("delay_min", min.coerceAtLeast(1))
+                    .putInt("delay_max", max.coerceAtLeast(min)).apply()
+                Toast.makeText(this, "延时已设置: $min-$max 秒", Toast.LENGTH_SHORT).show()
+                if (TaskService.isRunning) {
+                    val intent = Intent(this, TaskService::class.java).apply {
+                        action = "SET_DELAY"
+                        putExtra("delay_min", min)
+                        putExtra("delay_max", max)
+                    }
+                    startService(intent)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     private fun startTaskService() {

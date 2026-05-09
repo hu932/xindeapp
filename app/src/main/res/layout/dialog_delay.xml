@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="最小延时: "
+            android:textSize="14sp" />
+
+        <EditText
+            android:id="@+id/et_delay_min"
+            android:layout_width="80dp"
+            android:layout_height="wrap_content"
+            android:inputType="number"
+            android:text="3"
+            android:textSize="14sp"
+            android:gravity="center" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=" 秒"
+            android:textSize="14sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="8dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="最大延时: "
+            android:textSize="14sp" />
+
+        <EditText
+            android:id="@+id/et_delay_max"
+            android:layout_width="80dp"
+            android:layout_height="wrap_content"
+            android:inputType="number"
+            android:text="8"
+            android:textSize="14sp"
+            android:gravity="center" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=" 秒"
+            android:textSize="14sp" />
+    </LinearLayout>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="每次任务完成后等待 最小~最大 秒随机延时再执行下一个"
+        android:textSize="12sp"
+        android:textColor="#999999" />
+</LinearLayout>
