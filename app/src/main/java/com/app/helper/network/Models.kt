@@ -1,0 +1,43 @@
+package com.app.helper.network
+
+import com.google.gson.annotations.SerializedName
+
+data class ApiResponse<T>(
+    @SerializedName("code") val code: String = "",
+    @SerializedName("data") val data: T? = null,
+    @SerializedName("msg") val msg: String? = null
+) {
+    val isSuccess: Boolean get() = code == "200"
+}
+
+data class LoginData(
+    @SerializedName("token") val token: String = "",
+    @SerializedName("userLevel") val userLevel: Int = 0
+)
+
+data class TaskData(
+    @SerializedName("taskId") val taskId: String = "",
+    @SerializedName("taskUrl") val taskUrl: String = "",
+    @SerializedName("expireTime") val expireTime: String = "",
+    @SerializedName("releaseTime") val releaseTime: String = "",
+    @SerializedName("takeTime") val takeTime: String = "",
+    @SerializedName("platformInfo") val platformInfo: String = ""
+) {
+    fun parseShopId(): Long {
+        val parts = taskUrl.trimEnd('/').split("/")
+        return if (parts.size >= 2) parts[parts.size - 2].toLongOrNull() ?: 0 else 0
+    }
+
+    fun parseItemId(): Long {
+        val parts = taskUrl.trimEnd('/').split("/")
+        return parts.lastOrNull()?.toLongOrNull() ?: 0
+    }
+}
+
+data class SubmitResult(
+    @SerializedName("code") val code: String = "",
+    @SerializedName("msg") val msg: String? = null,
+    @SerializedName("taskId") val taskId: String = ""
+) {
+    val isSuccess: Boolean get() = code == "SUCCESS"
+}
