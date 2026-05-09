@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content">
+
+    <!-- Collapsed dot -->
+    <LinearLayout
+        android:id="@+id/ll_dot_container"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:background="@drawable/bg_float_dot"
+        android:gravity="center"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tv_dot"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="任"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Expanded panel -->
+    <LinearLayout
+        android:id="@+id/ll_expanded"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- Status text area -->
+        <TextView
+            android:id="@+id/tv_status"
+            android:layout_width="200dp"
+            android:layout_height="100dp"
+            android:background="#CC000000"
+            android:gravity="center"
+            android:padding="8dp"
+            android:text="点击【一键做任务】开始"
+            android:textColor="#FFFF00"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <!-- Action button -->
+        <TextView
+            android:id="@+id/tv_action"
+            android:layout_width="200dp"
+            android:layout_height="36dp"
+            android:background="#AA2196F3"
+            android:gravity="center"
+            android:text="一键做任务"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <!-- Close button -->
+        <ImageView
+            android:id="@+id/img_close"
+            android:layout_width="200dp"
+            android:layout_height="24dp"
+            android:layout_gravity="center_horizontal"
+            android:background="#66000000"
+            android:padding="2dp"
+            android:scaleType="centerInside"
+            android:src="@android:drawable/ic_menu_close_clear_cancel" />
+    </LinearLayout>
+</RelativeLayout>
