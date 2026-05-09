@@ -257,14 +257,33 @@ class TaskService : android.app.Service() {
 
                 delay(800)
 
-                // Step 2: Send wake broadcast - URL must contain --i. for task_id extraction
-                val wakeUrl = "https://shopee.tw/---i.${currentTaskId}.${currentShopId}.${currentItemId}"
-                val intent = Intent(ApiConfig.WAKE_ACTION).apply {
+                // Step 2: Wake target app + navigate to product page
+                // First: send broadcast with simple URL for framework to store shopId/itemId
+                val productUrl = "https://shopee.tw/product/$currentShopId/$currentItemId"
+                val wakeIntent = Intent(ApiConfig.WAKE_ACTION).apply {
                     setPackage(ApiConfig.TARGET_PACKAGE)
-                    putExtra("url", wakeUrl)
+                    putExtra("url", productUrl)
                 }
-                sendBroadcast(intent)
-                Log.d(TAG, "Wake broadcast sent: $wakeUrl")
+                sendBroadcast(wakeIntent)
+                Log.d(TAG, "Wake broadcast: $productUrl")
+
+                delay(1000)
+
+                // Then: launch Shopee app to product page via deep link
+                try {
+                    val launchIntent = Intent(Intent.ACTION_VIEW).apply {
+                        data = Uri.parse("https://shopee.tw/product/$currentShopId/$currentItemId")
+                        setPackage(ApiConfig.TARGET_PACKAGE)
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    }
+                    startActivity(launchIntent)
+                    Log.d(TAG, "Launched Shopee product page: shop=$currentShopId item=$currentItemId")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to launch Shopee", e)
+                    updateFloatStatus("启动Shopee失败: ${e.message}")
+                    if (isAutoRunning) startNextTaskCycle()
+                    return@launch
+                }
 
                 // Step 3: Wait for FILE_ACTION data
                 updateFloatStatus("等待数据回传...")
