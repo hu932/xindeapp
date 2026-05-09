@@ -16,10 +16,12 @@ class FingerprintProvider : ContentProvider() {
         private const val AUTHORITY = "com.yh.csyxgl.vivo.provider"
         private const val CODE_CURRENT_FP = 1
         private const val CODE_FP_BY_NAME = 2
+        private const val CODE_FP_BY_KEY = 3
 
         private val uriMatcher = UriMatcher(UriMatcher.NO_MATCH).apply {
             addURI(AUTHORITY, "current_fp", CODE_CURRENT_FP)
             addURI(AUTHORITY, "current_fp/*", CODE_FP_BY_NAME)
+            addURI(AUTHORITY, "fp/*", CODE_FP_BY_KEY)
         }
     }
 
@@ -33,10 +35,12 @@ class FingerprintProvider : ContentProvider() {
         sortOrder: String?
     ): Cursor? {
         val ctx = context ?: return null
-        val cursor = MatrixCursor(arrayOf("content"))
+        // Match original csyx.apk: two columns ["key", "content"]
+        val cursor = MatrixCursor(arrayOf("key", "content"))
 
         when (uriMatcher.match(uri)) {
             CODE_CURRENT_FP -> {
+                val activeName = FingerprintManager.getActiveFpName(ctx) ?: ""
                 var data = FingerprintManager.loadCurrentFp(ctx)
                 if (data == null) {
                     val fp = FingerprintManager.generateFullFp(ctx)
@@ -44,16 +48,18 @@ class FingerprintProvider : ContentProvider() {
                     data = fp.toString()
                     FingerprintManager.saveFingerprintData(ctx, name, data)
                     FingerprintManager.setActiveFp(ctx, name)
-                    Log.d(TAG, "Generated and serving new default FP: $name")
+                    cursor.addRow(arrayOf(name, data))
+                    Log.d(TAG, "Generated new FP: $name (${data.length} bytes)")
+                } else {
+                    cursor.addRow(arrayOf(activeName, data))
+                    Log.d(TAG, "Served FP: $activeName (${data.length} bytes)")
                 }
-                cursor.addRow(arrayOf(data))
-                Log.d(TAG, "Served current FP (${data.length} bytes)")
             }
-            CODE_FP_BY_NAME -> {
+            CODE_FP_BY_NAME, CODE_FP_BY_KEY -> {
                 val filename = uri.lastPathSegment ?: return cursor
                 val data = FingerprintManager.loadFingerprintData(ctx, filename)
                 if (data != null) {
-                    cursor.addRow(arrayOf(data))
+                    cursor.addRow(arrayOf(filename, data))
                     Log.d(TAG, "Served FP by name: $filename")
                 }
             }
