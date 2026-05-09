@@ -248,7 +248,6 @@ object FingerprintManager {
             put("0x11d", "000000000")
             put("0x11e", "000000000")
             put("0x121", "0")
-            put("0x122", "[]")
             put("0x123", "{}")
             put("0x13e", "71919287")
             put("0x13f", "7")
