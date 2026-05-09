@@ -1,8 +1,6 @@
 package com.app.helper.util
 
 import android.content.Context
-import android.os.Build
-import android.provider.Settings
 import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
@@ -180,8 +178,8 @@ object FingerprintManager {
             // Timestamps for various hex keys
             put("0x8", (now - (0..86400000).random()).toString())
             put("0x91", JSONObject().apply {
-                put("elapsedRealtime", ((1..72) * 3600000).toString())
-                put("uptimeMillis", ((1..72) * 3600000).toString())
+                put("elapsedRealtime", ((1..72).random() * 3600000L).toString())
+                put("uptimeMillis", ((1..72).random() * 3600000L).toString())
             }.toString())
             put("0xa9", (now - (0..3600000).random()).toString())
             put("0xdc", (now - (0..86400000).random()).toString())
