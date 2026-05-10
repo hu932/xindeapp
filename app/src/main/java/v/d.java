@@ -10,7 +10,7 @@ public abstract class d {
         for (int i = 0; i < len; i++) r[i] = hex[random.nextInt(16)];
         return new String(r);
     }
-    public static JSONObject b(c cv) {
+    public static JSONObject b(c cv) throws org.json.JSONException {
         if (cv == null) return null;
         JSONObject j = new JSONObject();
         JSONArray s1 = new JSONArray(); for (String s : cv.a) s1.put(s);
