@@ -290,7 +290,8 @@ class TaskService : android.app.Service() {
                 val groupId = TokenManager.getGroupId()
                 val taskResponse = ApiService.takeTask2(groupId)
                 if (!taskResponse.ok || taskResponse.taskData == null) {
-                    updateFloatStatus("领取任务失败")
+                    val msg = taskResponse.msg ?: "暂无任务"
+                    updateFloatStatus("$msg")
                     if (isAutoRunning) startNextTaskCycle()
                     return@launch
                 }
