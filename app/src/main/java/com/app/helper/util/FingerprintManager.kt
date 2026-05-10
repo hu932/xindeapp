@@ -133,7 +133,7 @@ object FingerprintManager {
         f7.put("snDecPool", snDecPool)
         f7.put("c1TimeOffsetDays", r.nextInt(61) - 30)
         f7.put("c2TimeOffsetDays", r.nextInt(61) - 30)
-        f7.put("leafOffsetDays", r.nextInt(30) + 1)
+        f7.put("leafOffsetDays", -(r.nextInt(30) + 1))
         f7.put("leafGapMs", r.nextInt(50001) + 10000)
         f7.put("vbh2", vbmetaDigest)
         f7.put("dl", "1")
@@ -324,8 +324,8 @@ object FingerprintManager {
             put("0x3e", randomHex(32))
             put("0x40", randomHex(20))
             put("0x41", ip)
-            put("0x42", ip)
-            put("0x43", randomHex(32))
+            put("0x42", getPackageInfoString(context, "com.android.systemui"))
+            put("0x43", getPackageInfoString(context, "com.android.settings"))
             put("0x63", screenW.toString())
             put("0x64", screenH.toString())
             put("0x65", dm.densityDpi.toString())
@@ -371,8 +371,8 @@ object FingerprintManager {
             put("0x146", keyECHashKey2)
             put("0x147", "0")
             put("0x152", keyECExtra1)
-            put("0x153", keyECExtra2)
-            put("0x154", randomHex(16))
+            put("0x153", getPackageInfoString(context, "com.android.settings"))
+            put("0x154", getPackageInfoString(context, "android"))
             put("0x165", randomHex(32))
             put("0x166", randomHex(32))
             put("0x2015", vbmetaDigest)
@@ -432,6 +432,43 @@ object FingerprintManager {
         val mtime = ctime + r.nextInt(3600)
         val atime = mtime + r.nextInt(10)
         return "${r.nextInt(2000) + 100},33188,0,0,${r.nextInt(8000) + 3000},$atime,$mtime,$ctime"
+    }
+
+    @SuppressLint("PackageManagerGetSignatures")
+    private fun getPackageInfoString(context: Context, packageName: String): String {
+        return try {
+            val pm = context.packageManager
+            val pi = pm.getPackageInfo(packageName, PackageManager.GET_SIGNATURES)
+            val sig = pi.signatures?.firstOrNull()
+            val md5 = if (sig != null) {
+                val md = java.security.MessageDigest.getInstance("MD5")
+                md.update(sig.toByteArray())
+                md.digest().joinToString("") { "%02x".format(it) }
+            } else "d087e72912fba064cafa78dc34aea839"
+            val ai = pm.getApplicationInfo(packageName, 0)
+            val apkSize = File(ai.sourceDir).length()
+            val versionName = pi.versionName ?: "1.0"
+            @Suppress("DEPRECATION")
+            val versionCode = pi.versionCode
+            val installTime = pi.firstInstallTime
+            val updateDelta = pi.lastUpdateTime - pi.firstInstallTime
+            val inode = Random().nextInt(100000) + 10000
+            "$md5$apkSize,$versionName,$versionCode,$installTime,$updateDelta,${inode + Random().nextInt(9) + 2}"
+        } catch (_: Exception) {
+            "d087e72912fba064cafa78dc34aea839"
+        }
+    }
+
+    fun dumpFpToDownloads(context: Context) {
+        try {
+            val fp = loadCurrentFp(context) ?: return
+            val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val file = File(dir, "fp_debug_${System.currentTimeMillis()}.json")
+            file.writeText(fp)
+            Log.i(TAG, "FP dumped to: ${file.absolutePath} (${fp.length} bytes)")
+        } catch (e: Exception) {
+            Log.e(TAG, "Dump FP failed", e)
+        }
     }
 
     data class FpFileInfo(

@@ -54,6 +54,7 @@ class FingerprintProvider : ContentProvider() {
                 val cursor = MatrixCursor(arrayOf("key", "content"))
                 cursor.addRow(arrayOf(activeName, data))
                 Log.d(TAG, "Served FP: $activeName (${data.length} bytes)")
+                Log.d(TAG, "FP preview: ${data.take(200)}...")
                 return cursor
             }
         }

@@ -94,6 +94,7 @@ class MainActivity : AppCompatActivity() {
             FingerprintManager.saveFingerprintData(this, name, fp.toString())
             FingerprintManager.setActiveFp(this, name)
         }
+        FingerprintManager.dumpFpToDownloads(this)
         updateFpDisplay()
     }
 
