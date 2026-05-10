@@ -45,6 +45,7 @@ data class SubmitResult(
 // ===== 接口二数据模型 =====
 data class Api2TaskResponse(
     @SerializedName("ok") val ok: Boolean = false,
+    @SerializedName("msg") val msg: String? = null,
     @SerializedName("TaskData") val taskData: Api2TaskData? = null
 )
 
