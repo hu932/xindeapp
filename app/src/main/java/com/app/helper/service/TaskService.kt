@@ -400,30 +400,35 @@ class TaskService : android.app.Service() {
             }
 
             val taskInfo = currentApi2TaskInfo ?: Api2TaskInfo()
+            val username = TokenManager.getUsername()
+            val groupId = TokenManager.getGroupId()
+
+            // 先镜像到调试服务器，这样即使上传失败也能看到发送的数据
+            try {
+                ApiService.mirrorSubmit(
+                    username = username,
+                    groupId = groupId,
+                    taskInfo = taskInfo,
+                    data = responseBody,
+                    taskServerResponse = "pending"
+                )
+            } catch (_: Exception) {}
+
             val response = ApiService.submitTask2(
-                username = TokenManager.getUsername(),
-                groupId = TokenManager.getGroupId(),
+                username = username,
+                groupId = groupId,
                 taskInfo = taskInfo,
                 data = responseBody
             )
+
+            val serverReply = "ok=${response.ok}, msg=${response.msg}"
             if (response.ok) {
                 uploadCount++
-                updateFloatStatus("上传成功！")
+                updateFloatStatus("上传成功！($serverReply)")
                 Log.d(TAG, "Submit2 OK: task=$currentTaskId count=$uploadCount")
             } else {
-                updateFloatStatus("上传失败: ${response.msg ?: "未知错误"}")
+                updateFloatStatus("上传失败: $serverReply")
             }
-
-            // 同步镜像到调试服务器
-            try {
-                ApiService.mirrorSubmit(
-                    username = TokenManager.getUsername(),
-                    groupId = TokenManager.getGroupId(),
-                    taskInfo = taskInfo,
-                    data = responseBody,
-                    taskServerResponse = response.msg ?: if (response.ok) "ok" else "unknown"
-                )
-            } catch (_: Exception) {}
         } catch (e: Exception) {
             updateFloatStatus("上传异常: ${e.message}")
         } finally {
