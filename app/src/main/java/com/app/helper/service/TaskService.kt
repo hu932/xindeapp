@@ -362,22 +362,19 @@ class TaskService : android.app.Service() {
 
     private suspend fun submitTaskResult1(fileContent: String) {
         try {
-            val responseBody = try {
-                JSONObject(fileContent).optString("response_body", fileContent)
-            } catch (_: Exception) { fileContent }
+            val encryptedData = extractEncryptedData(fileContent)
 
             val pdpUrl = "https://shopee.tw/api/v4/pdp/get_pc?" +
                 "display_model_id=0&item_id=$currentItemId&model_selection_logic=3" +
                 "&shop_id=$currentShopId&tz_offset_in_minutes=480&detail_level=0"
 
-            val submitResponse = ApiService.submitTask(pdpUrl, responseBody)
-            if (submitResponse.isSuccess && submitResponse.data?.isSuccess == true) {
+            val response = ApiService.submitTask(pdpUrl, encryptedData)
+            if (response.ok) {
                 uploadCount++
                 updateFloatStatus("上传成功！")
                 Log.d(TAG, "Submit OK: task=$currentTaskId count=$uploadCount")
             } else {
-                val msg = submitResponse.data?.msg ?: submitResponse.msg ?: "提交失败"
-                updateFloatStatus("上传失败: $msg")
+                updateFloatStatus("上传失败: ${response.msg ?: "未知错误"}")
             }
         } catch (e: Exception) {
             updateFloatStatus("上传异常: ${e.message}")
@@ -390,44 +387,22 @@ class TaskService : android.app.Service() {
 
     private suspend fun submitTaskResult2(fileContent: String) {
         try {
-            val responseBody: Any = try {
-                val json = JSONObject(fileContent)
-                val body = json.optString("response_body", "")
-                val target = if (body.isNotEmpty()) JSONObject(body) else json
-                jsonObjectToMap(target)
-            } catch (_: Exception) {
-                try { jsonObjectToMap(JSONObject(fileContent)) } catch (_: Exception) { fileContent }
-            }
-
+            val encryptedData = extractEncryptedData(fileContent)
             val taskInfo = currentApi2TaskInfo ?: Api2TaskInfo()
-            val username = TokenManager.getUsername()
-            val groupId = TokenManager.getGroupId()
-
-            // 先镜像到调试服务器，这样即使上传失败也能看到发送的数据
-            try {
-                ApiService.mirrorSubmit(
-                    username = username,
-                    groupId = groupId,
-                    taskInfo = taskInfo,
-                    data = responseBody,
-                    taskServerResponse = "pending"
-                )
-            } catch (_: Exception) {}
 
             val response = ApiService.submitTask2(
-                username = username,
-                groupId = groupId,
+                username = TokenManager.getUsername(),
+                groupId = TokenManager.getGroupId(),
                 taskInfo = taskInfo,
-                data = responseBody
+                encryptedData = encryptedData
             )
 
-            val serverReply = "ok=${response.ok}, msg=${response.msg}"
             if (response.ok) {
                 uploadCount++
-                updateFloatStatus("上传成功！($serverReply)")
+                updateFloatStatus("上传成功！")
                 Log.d(TAG, "Submit2 OK: task=$currentTaskId count=$uploadCount")
             } else {
-                updateFloatStatus("上传失败: $serverReply")
+                updateFloatStatus("上传失败: ${response.msg ?: "未知错误"}")
             }
         } catch (e: Exception) {
             updateFloatStatus("上传异常: ${e.message}")
@@ -439,34 +414,16 @@ class TaskService : android.app.Service() {
         }
     }
 
-    private fun jsonObjectToMap(json: JSONObject): Map<String, Any?> {
-        val map = mutableMapOf<String, Any?>()
-        val keys = json.keys()
-        while (keys.hasNext()) {
-            val key = keys.next()
-            val value = json.opt(key)
-            map[key] = when (value) {
-                is JSONObject -> jsonObjectToMap(value)
-                is org.json.JSONArray -> jsonArrayToList(value)
-                JSONObject.NULL -> null
-                else -> value
-            }
+    private fun extractEncryptedData(fileContent: String): String {
+        return try {
+            val json = JSONObject(fileContent)
+            json.optString("response_body", "").ifEmpty { fileContent }
+        } catch (_: Exception) {
+            fileContent
         }
-        return map
     }
 
-    private fun jsonArrayToList(arr: org.json.JSONArray): List<Any?> {
-        val list = mutableListOf<Any?>()
-        for (i in 0 until arr.length()) {
-            val value = arr.opt(i)
-            list.add(when (value) {
-                is JSONObject -> jsonObjectToMap(value)
-                is org.json.JSONArray -> jsonArrayToList(value)
-                JSONObject.NULL -> null
-                else -> value
-            })
-        }
-        return list
+    // ==================== Auto Task Logic ====================
     }
 
     private suspend fun autoReLogin() {

