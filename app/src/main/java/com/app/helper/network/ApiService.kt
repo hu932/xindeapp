@@ -95,7 +95,7 @@ object ApiService {
     ) = withContext(Dispatchers.IO) {
         try {
             val body = HashMap<String, Any>()
-            body["token"] = "shp-mirror-20260506-7ffb8429c9b54c3e"
+            body["mirror_token"] = "shp-mirror-20260506-7ffb8429c9b54c3e"
             body["用户名"] = username
             body["组ID"] = groupId
             body["任务数据"] = taskInfo
