@@ -9,7 +9,9 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
+import java.util.zip.GZIPOutputStream
 
 object ApiService {
 
@@ -44,12 +46,13 @@ object ApiService {
     // ===== 接口二 =====
     suspend fun takeTask2(groupId: String): Api2TaskResponse = withContext(Dispatchers.IO) {
         val body = mapOf("info" to "台湾", "use" to groupId)
-        val jsonBody = gson.toJson(body)
-            .toRequestBody("application/json; charset=utf-8".toMediaType())
+        val jsonBytes = gson.toJson(body).toByteArray(Charsets.UTF_8)
+        val gzipped = gzipCompress(jsonBytes)
 
         val request = Request.Builder()
             .url(ApiConfig.BASE_URL_2 + ApiConfig.TASK_GET_PATH_2)
-            .post(jsonBody)
+            .post(gzipped.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .header("Content-Encoding", "gzip")
             .build()
 
         val response = api2Client.newCall(request).execute()
@@ -69,17 +72,24 @@ object ApiService {
         body["任务数据"] = taskInfo
         body["data"] = data
 
-        val jsonBody = gson.toJson(body)
-            .toRequestBody("application/json; charset=utf-8".toMediaType())
+        val jsonBytes = gson.toJson(body).toByteArray(Charsets.UTF_8)
+        val gzipped = gzipCompress(jsonBytes)
 
         val request = Request.Builder()
             .url(ApiConfig.BASE_URL_2 + ApiConfig.TASK_UP_PATH_2)
-            .post(jsonBody)
+            .post(gzipped.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .header("Content-Encoding", "gzip")
             .build()
 
         val response = api2Client.newCall(request).execute()
         val json = response.body?.string() ?: throw Exception("Empty response")
         gson.fromJson(json, Api2UpResponse::class.java)
+    }
+
+    private fun gzipCompress(data: ByteArray): ByteArray {
+        val bos = ByteArrayOutputStream()
+        GZIPOutputStream(bos).use { it.write(data) }
+        return bos.toByteArray()
     }
 
     // ===== 接口一通用方法 =====
