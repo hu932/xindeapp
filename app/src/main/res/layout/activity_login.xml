@@ -32,8 +32,8 @@
     <com.google.android.material.textfield.TextInputLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="24dp"
-        android:hint="密码">
+        android:layout_marginBottom="16dp"
+        android:hint="密码 (接口一需要)">
 
         <com.google.android.material.textfield.TextInputEditText
             android:id="@+id/et_password"
@@ -42,11 +42,33 @@
             android:inputType="textPassword" />
     </com.google.android.material.textfield.TextInputLayout>
 
+    <com.google.android.material.textfield.TextInputLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="24dp"
+        android:hint="组ID (接口二需要)">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/et_group_id"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="text" />
+    </com.google.android.material.textfield.TextInputLayout>
+
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btn_login"
         android:layout_width="match_parent"
         android:layout_height="50dp"
         android:text="登录"
         android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/tv_login_hint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="填密码走接口一，填组ID走接口二，都填则优先接口一"
+        android:textColor="#999999"
+        android:textSize="12sp" />
 
 </LinearLayout>

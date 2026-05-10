@@ -25,6 +25,7 @@ import android.widget.TextView
 import com.app.helper.R
 import com.app.helper.network.ApiConfig
 import com.app.helper.network.ApiService
+import com.app.helper.network.Api2TaskInfo
 import com.app.helper.util.TokenManager
 import kotlinx.coroutines.*
 import org.json.JSONObject
@@ -73,6 +74,7 @@ class TaskService : android.app.Service() {
 
     private var receiver: BroadcastReceiver? = null
     @Volatile private var pendingFileContent: String? = null
+    private var currentApi2TaskInfo: Api2TaskInfo? = null
 
     private val prefs by lazy { getSharedPreferences(PREF_NAME, MODE_PRIVATE) }
     private val delayMin get() = prefs.getInt("delay_min", 3)
@@ -189,7 +191,8 @@ class TaskService : android.app.Service() {
     }
 
     private fun updateFloatStatus(message: String) {
-        statusMessage = "$message\n账号：${TokenManager.getUsername()}\n当日上传成功：$uploadCount"
+        val apiTag = if (TokenManager.getApiType() == TokenManager.API_TYPE_2) "[接口二]" else "[接口一]"
+        statusMessage = "$message\n$apiTag 账号：${TokenManager.getUsername()}\n当日上传成功：$uploadCount"
         handler.post { if (!isCollapsed) tvStatus?.text = statusMessage }
     }
 
@@ -232,18 +235,23 @@ class TaskService : android.app.Service() {
     }
 
     private fun claimAndExecuteTask() {
+        if (TokenManager.getApiType() == TokenManager.API_TYPE_2) {
+            claimAndExecuteTask2()
+        } else {
+            claimAndExecuteTask1()
+        }
+    }
+
+    private fun claimAndExecuteTask1() {
         serviceScope.launch {
             try {
-                // Step 1: Get task from API
                 val taskResponse = ApiService.takeTask()
                 if (!taskResponse.isSuccess || taskResponse.data == null) {
                     val msg = taskResponse.msg ?: "获取任务失败"
                     updateFloatStatus("领取任务失败：$msg")
                     if (msg.contains("登录") || msg.contains("token") || msg.contains("expired")) {
                         autoReLogin()
-                    } else if (isAutoRunning) {
-                        startNextTaskCycle()
-                    }
+                    } else if (isAutoRunning) { startNextTaskCycle() }
                     return@launch
                 }
 
@@ -251,64 +259,24 @@ class TaskService : android.app.Service() {
                 currentTaskId = task.taskId
                 currentShopId = task.parseShopId()
                 currentItemId = task.parseItemId()
+                currentApi2TaskInfo = null
                 pendingFileContent = null
 
                 updateFloatStatus("已领取任务\nshop=$currentShopId item=$currentItemId")
-
                 delay(800)
+                launchShopeeProduct()
 
-                // Step 2: Wake target app + navigate to product page
-                // First: send broadcast with simple URL for framework to store shopId/itemId
-                val productUrl = "https://shopee.tw/product/$currentShopId/$currentItemId"
-                val wakeIntent = Intent(ApiConfig.WAKE_ACTION).apply {
-                    setPackage(ApiConfig.TARGET_PACKAGE)
-                    putExtra("url", productUrl)
-                }
-                sendBroadcast(wakeIntent)
-                Log.d(TAG, "Wake broadcast: $productUrl")
-
-                delay(1000)
-
-                // Then: launch Shopee app to product page via deep link
-                try {
-                    val launchIntent = Intent(Intent.ACTION_VIEW).apply {
-                        data = Uri.parse("https://shopee.tw/product/$currentShopId/$currentItemId")
-                        setPackage(ApiConfig.TARGET_PACKAGE)
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                    }
-                    startActivity(launchIntent)
-                    Log.d(TAG, "Launched Shopee product page: shop=$currentShopId item=$currentItemId")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to launch Shopee", e)
-                    updateFloatStatus("启动Shopee失败: ${e.message}")
-                    if (isAutoRunning) startNextTaskCycle()
-                    return@launch
-                }
-
-                // Step 3: Wait for FILE_ACTION data
                 updateFloatStatus("等待数据回传...")
-                val timeout = 90_000L
-                val start = System.currentTimeMillis()
-                while (System.currentTimeMillis() - start < timeout) {
-                    if (pendingFileContent != null) break
-                    delay(500)
-                }
+                if (!waitForFileContent()) return@launch
 
-                if (pendingFileContent == null) {
-                    updateFloatStatus("数据回传超时(${timeout/1000}s)")
-                    if (isAutoRunning) startNextTaskCycle()
-                    return@launch
-                }
-
-                // Step 4: Submit result
                 val content = pendingFileContent!!
                 pendingFileContent = null
                 isUploading = true
                 updateFloatStatus("正在上传数据...")
-                submitTaskResult(content)
+                submitTaskResult1(content)
 
             } catch (e: Exception) {
-                Log.e(TAG, "Task error", e)
+                Log.e(TAG, "Task1 error", e)
                 updateFloatStatus("任务异常: ${e.message}")
                 isUploading = false
                 if (isAutoRunning) startNextTaskCycle()
@@ -316,7 +284,82 @@ class TaskService : android.app.Service() {
         }
     }
 
-    private suspend fun submitTaskResult(fileContent: String) {
+    private fun claimAndExecuteTask2() {
+        serviceScope.launch {
+            try {
+                val groupId = TokenManager.getGroupId()
+                val taskResponse = ApiService.takeTask2(groupId)
+                if (!taskResponse.ok || taskResponse.taskData == null) {
+                    updateFloatStatus("接口二领取任务失败")
+                    if (isAutoRunning) startNextTaskCycle()
+                    return@launch
+                }
+
+                val taskData = taskResponse.taskData
+                currentApi2TaskInfo = taskData.task
+                currentShopId = taskData.parseShopId()
+                currentItemId = taskData.parseItemId()
+                currentTaskId = taskData.task?.id ?: ""
+                pendingFileContent = null
+
+                updateFloatStatus("[接口二] 已领取任务\nshop=$currentShopId item=$currentItemId")
+                delay(800)
+                launchShopeeProduct()
+
+                updateFloatStatus("等待数据回传...")
+                if (!waitForFileContent()) return@launch
+
+                val content = pendingFileContent!!
+                pendingFileContent = null
+                isUploading = true
+                updateFloatStatus("正在上传数据...")
+                submitTaskResult2(content)
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Task2 error", e)
+                updateFloatStatus("接口二任务异常: ${e.message}")
+                isUploading = false
+                if (isAutoRunning) startNextTaskCycle()
+            }
+        }
+    }
+
+    private suspend fun launchShopeeProduct() {
+        val productUrl = "https://shopee.tw/product/$currentShopId/$currentItemId"
+        val wakeIntent = Intent(ApiConfig.WAKE_ACTION).apply {
+            setPackage(ApiConfig.TARGET_PACKAGE)
+            putExtra("url", productUrl)
+        }
+        sendBroadcast(wakeIntent)
+        Log.d(TAG, "Wake broadcast: $productUrl")
+        delay(1000)
+        try {
+            val launchIntent = Intent(Intent.ACTION_VIEW).apply {
+                data = Uri.parse(productUrl)
+                setPackage(ApiConfig.TARGET_PACKAGE)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            startActivity(launchIntent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to launch Shopee", e)
+            updateFloatStatus("启动Shopee失败: ${e.message}")
+            if (isAutoRunning) startNextTaskCycle()
+        }
+    }
+
+    private suspend fun waitForFileContent(): Boolean {
+        val timeout = 90_000L
+        val start = System.currentTimeMillis()
+        while (System.currentTimeMillis() - start < timeout) {
+            if (pendingFileContent != null) return true
+            delay(500)
+        }
+        updateFloatStatus("数据回传超时(${timeout/1000}s)")
+        if (isAutoRunning) startNextTaskCycle()
+        return false
+    }
+
+    private suspend fun submitTaskResult1(fileContent: String) {
         try {
             val responseBody = try {
                 JSONObject(fileContent).optString("response_body", fileContent)
@@ -344,7 +387,46 @@ class TaskService : android.app.Service() {
         }
     }
 
+    private suspend fun submitTaskResult2(fileContent: String) {
+        try {
+            val responseBody = try {
+                val json = JSONObject(fileContent)
+                val body = json.optString("response_body", "")
+                if (body.isNotEmpty()) JSONObject(body) else json
+            } catch (_: Exception) {
+                try { JSONObject(fileContent) } catch (_: Exception) { fileContent }
+            }
+
+            val taskInfo = currentApi2TaskInfo ?: Api2TaskInfo()
+            val response = ApiService.submitTask2(
+                username = TokenManager.getUsername(),
+                groupId = TokenManager.getGroupId(),
+                taskInfo = taskInfo,
+                data = responseBody
+            )
+            if (response.ok) {
+                uploadCount++
+                updateFloatStatus("[接口二] 上传成功！")
+                Log.d(TAG, "Submit2 OK: task=$currentTaskId count=$uploadCount")
+            } else {
+                updateFloatStatus("[接口二] 上传失败: ${response.msg ?: "未知错误"}")
+            }
+        } catch (e: Exception) {
+            updateFloatStatus("[接口二] 上传异常: ${e.message}")
+        } finally {
+            isUploading = false
+            currentTaskId = ""
+            currentApi2TaskInfo = null
+            if (isAutoRunning) startNextTaskCycle()
+        }
+    }
+
     private suspend fun autoReLogin() {
+        if (TokenManager.getApiType() == TokenManager.API_TYPE_2) {
+            updateFloatStatus("[接口二] 无需重新登录，继续执行...")
+            if (isAutoRunning) startNextTaskCycle()
+            return
+        }
         updateFloatStatus("登录过期，正在重新登录...")
         try {
             val username = TokenManager.getUsername()

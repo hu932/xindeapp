@@ -41,3 +41,34 @@ data class SubmitResult(
 ) {
     val isSuccess: Boolean get() = code == "SUCCESS"
 }
+
+// ===== 接口二数据模型 =====
+data class Api2TaskResponse(
+    @SerializedName("ok") val ok: Boolean = false,
+    @SerializedName("TaskData") val taskData: Api2TaskData? = null
+)
+
+data class Api2TaskData(
+    @SerializedName("Url") val url: String = "",
+    @SerializedName("Task") val task: Api2TaskInfo? = null
+) {
+    fun parseShopId(): Long {
+        val parts = url.trimEnd('/').split("/")
+        return if (parts.size >= 2) parts[parts.size - 2].toLongOrNull() ?: 0 else 0
+    }
+    fun parseItemId(): Long {
+        val parts = url.trimEnd('/').split("/")
+        return parts.lastOrNull()?.toLongOrNull() ?: 0
+    }
+}
+
+data class Api2TaskInfo(
+    @SerializedName("ID") val id: String = "",
+    @SerializedName("TaskNumber") val taskNumber: String = "",
+    @SerializedName("TaskType") val taskType: String = ""
+)
+
+data class Api2UpResponse(
+    @SerializedName("ok") val ok: Boolean = false,
+    @SerializedName("msg") val msg: String? = null
+)

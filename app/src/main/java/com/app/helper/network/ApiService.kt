@@ -1,17 +1,29 @@
 package com.app.helper.network
 
 import com.google.gson.Gson
+import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.TimeUnit
 
 object ApiService {
 
     private val gson = Gson()
 
+    private val api2Client: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
+            .build()
+    }
+
+    // ===== 接口一 =====
     suspend fun login(username: String, password: String): ApiResponse<LoginData> {
         return post(ApiConfig.LOGIN_PATH, mapOf("username" to username, "password" to password))
     }
@@ -29,6 +41,48 @@ object ApiService {
         return post(ApiConfig.TASK_SUBMIT_PATH, body)
     }
 
+    // ===== 接口二 =====
+    suspend fun takeTask2(groupId: String): Api2TaskResponse = withContext(Dispatchers.IO) {
+        val body = mapOf("info" to "台湾", "use" to groupId)
+        val jsonBody = gson.toJson(body)
+            .toRequestBody("application/json; charset=utf-8".toMediaType())
+
+        val request = Request.Builder()
+            .url(ApiConfig.BASE_URL_2 + ApiConfig.TASK_GET_PATH_2)
+            .post(jsonBody)
+            .build()
+
+        val response = api2Client.newCall(request).execute()
+        val json = response.body?.string() ?: throw Exception("Empty response")
+        gson.fromJson(json, Api2TaskResponse::class.java)
+    }
+
+    suspend fun submitTask2(
+        username: String,
+        groupId: String,
+        taskInfo: Api2TaskInfo,
+        data: Any
+    ): Api2UpResponse = withContext(Dispatchers.IO) {
+        val body = HashMap<String, Any>()
+        body["用户名"] = username
+        body["组ID"] = groupId
+        body["任务数据"] = taskInfo
+        body["data"] = data
+
+        val jsonBody = gson.toJson(body)
+            .toRequestBody("application/json; charset=utf-8".toMediaType())
+
+        val request = Request.Builder()
+            .url(ApiConfig.BASE_URL_2 + ApiConfig.TASK_UP_PATH_2)
+            .post(jsonBody)
+            .build()
+
+        val response = api2Client.newCall(request).execute()
+        val json = response.body?.string() ?: throw Exception("Empty response")
+        gson.fromJson(json, Api2UpResponse::class.java)
+    }
+
+    // ===== 接口一通用方法 =====
     private suspend inline fun <reified T> get(path: String): ApiResponse<T> = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url(ApiConfig.BASE_URL + path)
