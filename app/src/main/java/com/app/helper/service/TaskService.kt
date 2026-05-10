@@ -424,7 +424,6 @@ class TaskService : android.app.Service() {
     }
 
     // ==================== Auto Task Logic ====================
-    }
 
     private suspend fun autoReLogin() {
         if (TokenManager.getApiType() == TokenManager.API_TYPE_2) {
