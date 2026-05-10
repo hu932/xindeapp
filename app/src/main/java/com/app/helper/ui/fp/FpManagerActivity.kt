@@ -41,7 +41,7 @@ class FpManagerActivity : AppCompatActivity() {
 
     private fun generateNewFp() {
         val fp = FingerprintManager.generateFullFp(this)
-        val name = fp.optString("name", "fp_${System.currentTimeMillis()}") + ".json"
+        val name = fp.optString("name", "fp_${System.currentTimeMillis()}")
         FingerprintManager.saveFingerprintData(this, name, fp.toString())
         Toast.makeText(this, "已生成: $name", Toast.LENGTH_SHORT).show()
         refreshList()
@@ -56,7 +56,7 @@ class FpManagerActivity : AppCompatActivity() {
                 Thread {
                     repeat(count) { i ->
                         val fp = FingerprintManager.generateFullFp(this)
-                        val name = fp.optString("name", "fp_${System.currentTimeMillis()}_$i") + ".json"
+                        val name = fp.optString("name", "fp_${System.currentTimeMillis()}_$i")
                         FingerprintManager.saveFingerprintData(this, name, fp.toString())
                         Thread.sleep(10)
                     }

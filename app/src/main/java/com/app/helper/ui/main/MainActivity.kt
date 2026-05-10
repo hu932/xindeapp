@@ -90,7 +90,7 @@ class MainActivity : AppCompatActivity() {
         val fpFiles = FingerprintManager.listFpFiles(this)
         if (fpFiles.isEmpty()) {
             val fp = FingerprintManager.generateFullFp(this)
-            val name = fp.optString("name", "default") + ".json"
+            val name = fp.optString("name", "default")
             FingerprintManager.saveFingerprintData(this, name, fp.toString())
             FingerprintManager.setActiveFp(this, name)
         }

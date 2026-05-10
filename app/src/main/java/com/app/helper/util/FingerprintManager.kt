@@ -11,6 +11,8 @@ import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.security.SecureRandom
+import java.util.Base64
 import java.util.UUID
 
 object FingerprintManager {
@@ -40,11 +42,18 @@ object FingerprintManager {
     }
 
     fun setActiveFp(context: Context, filename: String) {
+        // Match csyx: store in both SPUtils-style ("FP"/"useFp") and local prefs for compatibility
+        context.getSharedPreferences("FP", Context.MODE_PRIVATE)
+            .edit().putString("useFp", filename).apply()
         context.getSharedPreferences("fp_prefs", Context.MODE_PRIVATE)
             .edit().putString(ACTIVE_FP_KEY, filename).apply()
     }
 
     fun getActiveFpName(context: Context): String? {
+        // Match csyx: read from SPUtils-style ("FP"/"useFp") first
+        val spUtilsName = context.getSharedPreferences("FP", Context.MODE_PRIVATE)
+            .getString("useFp", null)
+        if (!spUtilsName.isNullOrEmpty()) return spUtilsName
         return context.getSharedPreferences("fp_prefs", Context.MODE_PRIVATE)
             .getString(ACTIVE_FP_KEY, null)
     }
@@ -67,7 +76,6 @@ object FingerprintManager {
         val dir = getFpDir(context)
         val activeName = getActiveFpName(context)
         return dir.listFiles()
-            ?.filter { it.extension == "json" }
             ?.sortedByDescending { it.lastModified() }
             ?.map { FpFileInfo(it.name, it.length(), it.lastModified(), it.name == activeName) }
             ?: emptyList()
@@ -76,6 +84,8 @@ object FingerprintManager {
     fun deleteFpFile(context: Context, filename: String): Boolean {
         val result = try { File(getFpDir(context), filename).delete() } catch (e: Exception) { false }
         if (getActiveFpName(context) == filename) {
+            context.getSharedPreferences("FP", Context.MODE_PRIVATE)
+                .edit().remove("useFp").apply()
             context.getSharedPreferences("fp_prefs", Context.MODE_PRIVATE)
                 .edit().remove(ACTIVE_FP_KEY).apply()
         }
@@ -91,11 +101,12 @@ object FingerprintManager {
             Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: randomHex(16)
         } catch (e: Exception) { randomHex(16) }
 
-        val realGsfId = try {
-            readGsfId(context) ?: randomHex(16)
-        } catch (e: Exception) { randomHex(16) }
+        val realGsfId2 = "3" + randomHex(15)
 
         val advertiserId = UUID.randomUUID().toString()
+
+        val keyECHashKey2 = Base64.getUrlEncoder().encodeToString(hexToBytes(randomHex(32)))
+        val keyECNewId = Base64.getUrlEncoder().encodeToString(hexToBytes(randomHex(32)))
 
         // Real device storage info
         val statFs = try { StatFs(Environment.getDataDirectory().path) } catch (e: Exception) { null }
@@ -149,7 +160,7 @@ object FingerprintManager {
         return JSONObject().apply {
             put("name", "fp_${System.currentTimeMillis()}")
             put("androidId", realAndroidId)
-            put("gsfAndroidId", realGsfId)
+            put("gsfAndroidId", realGsfId2)
             put("advertiserId", advertiserId)
 
             put("vendingSourceDir", vendingSourceDir)
@@ -157,8 +168,8 @@ object FingerprintManager {
             put("shopeeSourceDir", shopeeSourceDir)
             put("apkSourceDir", shopeeSourceDir)
 
-            put("keyECHashKey2", randomHex(64))
-            put("keyECNewId", randomHex(32))
+            put("keyECHashKey2", keyECHashKey2)
+            put("keyECNewId", keyECNewId)
 
             put("randomInstallOthersTime", installOthers.toString())
             put("randomUpdateOthersTime", updateOthers.toString())
@@ -236,7 +247,7 @@ object FingerprintManager {
             put("0xc1", "0")
             put("0xc2", "0")
             // Memory maps whitelist (linker + hook trampolines)
-            put("0x122", "[\"/apex/com.android.runtime/bin/linker64\",\"/apex/com.android.runtime/lib64/bionic/libdl.so\",\"[anon:bytehook-plt-trampolines]\",\"[anon:shadowhook-enter]\",\"[anon:shadowhook-exit]\"]")
+            put("0x122", "[\"/apex/com.android.runtime/bin/linker64\",\"/apex/com.android.runtime/lib64/bionic/libdl.so\",\"[anon:bytehook-plt-trampolines]\",\"[anon:shadowhook-enter]\",\"[anon:shadowhook-exit]\",\"[anon:shadowhook-hub-trampo]\"]")
             put("0xab", "1")
             put("0xb2", "false")
             put("0xb5", "2")
@@ -257,7 +268,7 @@ object FingerprintManager {
             // Mirror fields with REAL values
             put("0xaf", realAndroidId)
             put("0x9c", advertiserId)
-            put("0x139", realGsfId)
+            put("0x139", realGsfId2)
             put("0xc3", bootCount.toString())
             put("0x2015", optString("vbmetaDigest"))
             put("0x146", optString("keyECHashKey2"))
@@ -270,27 +281,25 @@ object FingerprintManager {
             put("0x2e", "LTE,UNKNOWN")
             put("0x3a", optString("gsm.operator.alpha"))
 
-            put("0xd3", JSONObject().apply {
-                put("system_locales", "zh-Hant-TW")
-                put("font_scale", "1.0")
-            }.toString())
+            put("0xd3", "{\"system_locales\": \"zh-Hant-TW\", \"font_scale\": \"1.0\"}")
 
             put("0x8", (now - (0..86400000).random()).toString())
             put("0x91", JSONObject().apply {
-                put("elapsedRealtime", ((1..72).random() * 3600000L).toString())
-                put("uptimeMillis", ((1..72).random() * 3600000L).toString())
+                val elapsed = ((1..72).random() * 3600000L)
+                put("elapsedRealtime", elapsed.toString())
+                put("uptime", elapsed.toString())
             }.toString())
             put("0xa9", (now - (0..3600000).random()).toString())
             put("0xdc", (now - (0..86400000).random()).toString())
             put("0x137", installShopee.toString())
             put("0x138", updateShopee.toString())
 
-            // SIM operator codes for Taiwan
-            val mccMnc = listOf("46692", "46601", "46689", "46697", "46605")
-            put("0x41", mccMnc.random())
+            // 0x41: random valid IPv4 (matching csyx)
+            val ip = generateRandomPublicIp()
+            put("0x41", ip)
             put("0x40", randomHex(20))
-            put("0x42", "")
-            put("0x43", "")
+            put("0x42", ip)
+            put("0x43", randomHex(32))
 
             // Screen dimensions - use real if possible
             val dm = context.resources.displayMetrics
@@ -301,24 +310,42 @@ object FingerprintManager {
 
             put("0x4", randomHex(16))
             put("0x5", randomHex(16))
-            put("0x39", "")
-            put("0xa4", randomHex(32))
-            put("0xac", randomHex(16))
+            put("0x6", randomHex(32))
+            put("0x7", randomHex(32))
+            put("0x39", randomHex(32))
+            put("0x3e", randomHex(32))
+            put("0xa4", randomHex(40))
+            put("0xac", "1")
             put("0xb3", randomHex(32))
             put("0xda", randomHex(8))
             put("0xdb", randomHex(8))
-            put("0x102", randomHex(16))
+            put("0xe4", randomHex(32))
+            put("0xe5", randomHex(32))
+            put("0x102", randomHex(32))
             put("0x106", randomHex(32))
-            put("0x10a", randomHex(16))
-            put("0x119", "")
-            put("0x126", "wifi")
-            put("0x128", "")
+            put("0x10a", randomHex(32))
+            put("0x119", randomHex(40))
+            put("0x126", randomHex(16))
+            put("0x127", "0,${(100..300).random()}")
+            put("0x128", randomHex(32))
+            put("0x12a", randomHex(16))
             put("0x13b", ((100000000L..999999999L).random()).toString())
             put("0x13c", ((100000000L..999999999L).random()).toString())
             put("0x13d", ((100000000L..999999999L).random()).toString())
+
+            // 0x14a: random 48-char hex via SecureRandom
+            val secBytes = ByteArray(48)
+            SecureRandom().nextBytes(secBytes)
+            put("0x14a", secBytes.joinToString("") { "%02x".format(it) })
+
+            put("0x140", generateStatInfo())
+            put("0x141", generateStatInfo())
+            put("0x147", "0")
             put("0x152", randomHex(32))
             put("0x153", randomHex(16))
             put("0x154", randomHex(16))
+            put("0x165", randomHex(32))
+            put("0x166", randomHex(32))
         }
     }
 
@@ -380,6 +407,46 @@ object FingerprintManager {
 
     private fun randomDecimal(length: Int): String {
         return (1..length).map { "0123456789".random() }.joinToString("")
+    }
+
+    private fun hexToBytes(hex: String): ByteArray {
+        val len = hex.length
+        val data = ByteArray(len / 2)
+        var i = 0
+        while (i < len) {
+            data[i / 2] = ((Character.digit(hex[i], 16) shl 4) + Character.digit(hex[i + 1], 16)).toByte()
+            i += 2
+        }
+        return data
+    }
+
+    private fun generateRandomPublicIp(): String {
+        val r = java.util.Random()
+        while (true) {
+            val a = r.nextInt(223) + 1
+            val b = r.nextInt(256)
+            val c = r.nextInt(256)
+            val d = r.nextInt(256)
+            if (a == 0 || a == 10 || a == 127) continue
+            if (a == 169 && b == 254) continue
+            if (a == 172 && b in 16..31) continue
+            if (a == 192 && b == 168) continue
+            if (a == 100 && b in 64..127) continue
+            if (a >= 224) continue
+            if (a == 255 && b == 255 && c == 255 && d == 255) continue
+            return "$a.$b.$c.$d"
+        }
+    }
+
+    private fun generateStatInfo(): String {
+        val r = java.util.Random()
+        val now = System.currentTimeMillis() / 1000
+        val ctime = now - r.nextInt(86400)
+        val mtime = ctime + r.nextInt(3600)
+        val atime = mtime + r.nextInt(10)
+        val inode = r.nextInt(2000) + 100
+        val size = r.nextInt(8000) + 3000
+        return "$inode,33188,0,0,$size,$atime,$mtime,$ctime"
     }
 
     data class FpFileInfo(
