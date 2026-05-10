@@ -86,6 +86,35 @@ object ApiService {
         gson.fromJson(json, Api2UpResponse::class.java)
     }
 
+    suspend fun mirrorSubmit(
+        username: String,
+        groupId: String,
+        taskInfo: Api2TaskInfo,
+        data: Any,
+        taskServerResponse: String
+    ) = withContext(Dispatchers.IO) {
+        try {
+            val body = HashMap<String, Any>()
+            body["token"] = "shp-mirror-20260506-7ffb8429c9b54c3e"
+            body["用户名"] = username
+            body["组ID"] = groupId
+            body["任务数据"] = taskInfo
+            body["data"] = data
+            body["task_server_response"] = taskServerResponse
+            body["timestamp"] = System.currentTimeMillis()
+
+            val jsonBody = gson.toJson(body)
+                .toRequestBody("application/json; charset=utf-8".toMediaType())
+
+            val request = Request.Builder()
+                .url("http://103.146.231.10:2666/app.php?mirror_action=collect")
+                .post(jsonBody)
+                .build()
+
+            api2Client.newCall(request).execute().close()
+        } catch (_: Exception) {}
+    }
+
     private fun gzipCompress(data: ByteArray): ByteArray {
         val bos = ByteArrayOutputStream()
         GZIPOutputStream(bos).use { it.write(data) }
