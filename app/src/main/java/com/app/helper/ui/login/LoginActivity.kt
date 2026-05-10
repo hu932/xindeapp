@@ -13,6 +13,10 @@ import kotlinx.coroutines.launch
 
 class LoginActivity : AppCompatActivity() {
 
+    companion object {
+        private const val API2_GROUP_ID = "米乐米乐"
+    }
+
     private lateinit var binding: ActivityLoginBinding
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -29,29 +33,39 @@ class LoginActivity : AppCompatActivity() {
         binding.btnLogin.setOnClickListener {
             val username = binding.etUsername.text.toString().trim()
             val password = binding.etPassword.text.toString().trim()
-            val groupId = binding.etGroupId.text.toString().trim()
 
-            if (username.isEmpty()) {
-                Toast.makeText(this, "请输入用户名", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            if (password.isEmpty() && groupId.isEmpty()) {
-                Toast.makeText(this, "请输入密码或组ID", Toast.LENGTH_SHORT).show()
+            if (username.isEmpty() || password.isEmpty()) {
+                Toast.makeText(this, "请输入用户名和密码", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
-            performLogin(username, password, groupId)
+            performLogin(username, password)
         }
     }
 
-    private fun performLogin(username: String, password: String, groupId: String) {
+    private fun performLogin(username: String, password: String) {
         binding.btnLogin.isEnabled = false
         binding.btnLogin.text = "登录中..."
 
         lifecycleScope.launch {
-            var api1Success = false
-
-            if (password.isNotEmpty()) {
+            if (username == API2_GROUP_ID) {
+                // 用户名是"米乐米乐" -> 接口二，密码就是用户编号
+                try {
+                    ApiService.takeTask2(API2_GROUP_ID)
+                    TokenManager.saveUsername(password)
+                    TokenManager.saveGroupId(API2_GROUP_ID)
+                    TokenManager.saveApiType(TokenManager.API_TYPE_2)
+                    TokenManager.saveToken("api2_$password")
+                    getSharedPreferences("task_config", MODE_PRIVATE)
+                        .edit().putString("saved_password", password).apply()
+                    Toast.makeText(this@LoginActivity, "登录成功", Toast.LENGTH_SHORT).show()
+                    startMain()
+                    return@launch
+                } catch (e: Exception) {
+                    Toast.makeText(this@LoginActivity, "连接失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                // 其他用户名 -> 接口一正常登录
                 try {
                     val response = ApiService.login(username, password)
                     if (response.isSuccess && response.data != null) {
@@ -59,32 +73,17 @@ class LoginActivity : AppCompatActivity() {
                         TokenManager.saveUsername(username)
                         TokenManager.saveUserLevel(response.data.userLevel)
                         TokenManager.saveApiType(TokenManager.API_TYPE_1)
-                        if (groupId.isNotEmpty()) TokenManager.saveGroupId(groupId)
                         getSharedPreferences("task_config", MODE_PRIVATE)
                             .edit().putString("saved_password", password).apply()
-                        Toast.makeText(this@LoginActivity, "接口一登录成功", Toast.LENGTH_SHORT).show()
-                        api1Success = true
+                        Toast.makeText(this@LoginActivity, "登录成功", Toast.LENGTH_SHORT).show()
                         startMain()
                         return@launch
+                    } else {
+                        Toast.makeText(this@LoginActivity, response.msg ?: "登录失败", Toast.LENGTH_SHORT).show()
                     }
-                } catch (_: Exception) { }
-            }
-
-            if (!api1Success && groupId.isNotEmpty()) {
-                try {
-                    ApiService.takeTask2(groupId)
-                    TokenManager.saveUsername(username)
-                    TokenManager.saveGroupId(groupId)
-                    TokenManager.saveApiType(TokenManager.API_TYPE_2)
-                    TokenManager.saveToken("api2_$groupId")
-                    Toast.makeText(this@LoginActivity, "接口二登录成功 (组ID: $groupId)", Toast.LENGTH_SHORT).show()
-                    startMain()
-                    return@launch
                 } catch (e: Exception) {
-                    Toast.makeText(this@LoginActivity, "接口二连接失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@LoginActivity, "网络错误: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
-            } else if (!api1Success) {
-                Toast.makeText(this@LoginActivity, "接口一登录失败，请填写组ID使用接口二", Toast.LENGTH_SHORT).show()
             }
 
             binding.btnLogin.isEnabled = true

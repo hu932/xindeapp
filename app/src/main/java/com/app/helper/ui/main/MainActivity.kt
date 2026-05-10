@@ -26,6 +26,7 @@ import org.json.JSONObject
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
+    private var logReceiver: android.content.BroadcastReceiver? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,6 +36,7 @@ class MainActivity : AppCompatActivity() {
         requestPermissions()
         initFingerprint()
         setupUI()
+        registerLogReceiver()
 
         // Start service with float window
         if (checkOverlayPermission()) {
@@ -83,7 +85,33 @@ class MainActivity : AppCompatActivity() {
                 .show()
         }
 
-        binding.btnClearLog.setOnClickListener {}
+        binding.btnClearLog.setOnClickListener { binding.tvLogs.text = "" }
+    }
+
+    private fun appendLog(msg: String) {
+        val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+        binding.tvLogs.append("[$time] $msg\n")
+        binding.scrollLogs.post { binding.scrollLogs.fullScroll(android.view.View.FOCUS_DOWN) }
+    }
+
+    private fun registerLogReceiver() {
+        logReceiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                val msg = intent.getStringExtra("log_msg") ?: return
+                appendLog(msg)
+            }
+        }
+        val filter = android.content.IntentFilter("com.app.helper.LOG_ACTION")
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(logReceiver, filter, RECEIVER_EXPORTED)
+        } else {
+            registerReceiver(logReceiver, filter)
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        logReceiver?.let { try { unregisterReceiver(it) } catch (_: Exception) {} }
     }
 
     private fun initFingerprint() {

@@ -191,9 +191,9 @@ class TaskService : android.app.Service() {
     }
 
     private fun updateFloatStatus(message: String) {
-        val apiTag = if (TokenManager.getApiType() == TokenManager.API_TYPE_2) "[接口二]" else "[接口一]"
-        statusMessage = "$message\n$apiTag 账号：${TokenManager.getUsername()}\n当日上传成功：$uploadCount"
+        statusMessage = "$message\n账号：${TokenManager.getUsername()}\n当日上传成功：$uploadCount"
         handler.post { if (!isCollapsed) tvStatus?.text = statusMessage }
+        try { sendBroadcast(Intent("com.app.helper.LOG_ACTION").putExtra("log_msg", message)) } catch (_: Exception) {}
     }
 
     private fun toggleAutoTask() {
@@ -290,7 +290,7 @@ class TaskService : android.app.Service() {
                 val groupId = TokenManager.getGroupId()
                 val taskResponse = ApiService.takeTask2(groupId)
                 if (!taskResponse.ok || taskResponse.taskData == null) {
-                    updateFloatStatus("接口二领取任务失败")
+                    updateFloatStatus("领取任务失败")
                     if (isAutoRunning) startNextTaskCycle()
                     return@launch
                 }
@@ -302,7 +302,7 @@ class TaskService : android.app.Service() {
                 currentTaskId = taskData.task?.id ?: ""
                 pendingFileContent = null
 
-                updateFloatStatus("[接口二] 已领取任务\nshop=$currentShopId item=$currentItemId")
+                updateFloatStatus("已领取任务\nshop=$currentShopId item=$currentItemId")
                 delay(800)
                 launchShopeeProduct()
 
@@ -317,7 +317,7 @@ class TaskService : android.app.Service() {
 
             } catch (e: Exception) {
                 Log.e(TAG, "Task2 error", e)
-                updateFloatStatus("接口二任务异常: ${e.message}")
+                updateFloatStatus("任务异常: ${e.message}")
                 isUploading = false
                 if (isAutoRunning) startNextTaskCycle()
             }
@@ -406,13 +406,13 @@ class TaskService : android.app.Service() {
             )
             if (response.ok) {
                 uploadCount++
-                updateFloatStatus("[接口二] 上传成功！")
+                updateFloatStatus("上传成功！")
                 Log.d(TAG, "Submit2 OK: task=$currentTaskId count=$uploadCount")
             } else {
-                updateFloatStatus("[接口二] 上传失败: ${response.msg ?: "未知错误"}")
+                updateFloatStatus("上传失败: ${response.msg ?: "未知错误"}")
             }
         } catch (e: Exception) {
-            updateFloatStatus("[接口二] 上传异常: ${e.message}")
+            updateFloatStatus("上传异常: ${e.message}")
         } finally {
             isUploading = false
             currentTaskId = ""
@@ -423,7 +423,7 @@ class TaskService : android.app.Service() {
 
     private suspend fun autoReLogin() {
         if (TokenManager.getApiType() == TokenManager.API_TYPE_2) {
-            updateFloatStatus("[接口二] 无需重新登录，继续执行...")
+            updateFloatStatus("继续执行...")
             if (isAutoRunning) startNextTaskCycle()
             return
         }
