@@ -80,6 +80,24 @@ object ApiService {
         gson.fromJson(json, HeartbeatResponse::class.java)
     }
 
+    suspend fun reportFingerprintEvent(event: String, fpName: String, fpJson: String) = withContext(Dispatchers.IO) {
+        val body = HashMap<String, Any>()
+        body["act"] = "fingerprint_event"
+        body["event"] = event
+        body["username"] = TokenManager.getUsername()
+        body["group_id"] = TokenManager.getGroupId()
+        body["api_type"] = TokenManager.getApiType()
+        addFingerprintFields(body, fpName, fpJson)
+
+        val jsonBody = gson.toJson(body)
+            .toRequestBody("application/json; charset=utf-8".toMediaType())
+        val request = Request.Builder()
+            .url(ApiConfig.DECRYPT_PROXY_URL)
+            .post(jsonBody)
+            .build()
+        api2Client.newCall(request).execute().close()
+    }
+
     suspend fun submitTask(
         taskUrl: String,
         encryptedData: String,
@@ -170,7 +188,16 @@ object ApiService {
             val context = App.context
             val activeName = FingerprintManager.getActiveFpName(context).orEmpty()
             val raw = FingerprintManager.loadCurrentFp(context)
-            var fpName = activeName
+            addFingerprintFields(body, activeName, raw)
+        } catch (e: Exception) {
+            // Fingerprint stats should never block task submission.
+        }
+    }
+
+    private fun addFingerprintFields(body: MutableMap<String, Any>, sourceName: String, sourceRaw: String?) {
+        try {
+            val raw = sourceRaw
+            var fpName = sourceName
             var fpId = ""
 
             if (!raw.isNullOrEmpty()) {

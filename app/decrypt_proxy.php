@@ -14,6 +14,7 @@ $DEVICE_FILE = __DIR__ . '/device_controls.json';
 $UPDATE_FILE = __DIR__ . '/app_update.json';
 $APK_DIR = __DIR__ . '/app_updates';
 $STATS_DIR = __DIR__ . '/daily_stats';
+$FP_ENV_STATS_DIR = __DIR__ . '/fingerprint_env_stats';
 $API1_TOKEN_FILE = __DIR__ . '/api1_token.json';
 $API1_ACCOUNTS_FILE = __DIR__ . '/api1_allowed_accounts.json';
 $API2_ACCOUNTS_FILE = __DIR__ . '/api2_allowed_accounts.json';
@@ -561,6 +562,51 @@ function recordStats(string $dir, array $input, int $apiType, string $status, st
     @file_put_contents($file, json_encode($stats, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), LOCK_EX);
 }
 
+function recordFingerprintEnvEvent(string $dir, array $input): array {
+    $event = trim((string)($input['event'] ?? ''));
+    if (!in_array($event, ['generate', 'use'], true)) {
+        return ['ok' => false, 'msg' => '未知指纹事件'];
+    }
+
+    $date = date('Y-m-d');
+    $file = getStatsFile($dir, $date);
+    $stats = readDayStats($dir, $date);
+    $fp = fingerprintInfoFromInput($input);
+    $key = $fp['key'];
+
+    if (!isset($stats[$key])) {
+        $stats[$key] = [
+            'fingerprint_key' => $fp['fingerprint_key'],
+            'fingerprint_id' => $fp['fingerprint_id'],
+            'fingerprint_name' => $fp['fingerprint_name'],
+            'username' => $fp['username'],
+            'group_id' => $fp['group_id'],
+            'device_id' => $fp['device_id'],
+            'total' => 0,
+            'generate' => 0,
+            'use' => 0,
+            'records' => [],
+        ];
+    }
+
+    $stats[$key]['fingerprint_key'] = $fp['fingerprint_key'];
+    $stats[$key]['fingerprint_id'] = $fp['fingerprint_id'];
+    $stats[$key]['fingerprint_name'] = $fp['fingerprint_name'];
+    $stats[$key]['username'] = $fp['username'];
+    $stats[$key]['group_id'] = $fp['group_id'];
+    $stats[$key]['device_id'] = $fp['device_id'];
+    $stats[$key]['last_seen'] = date('Y-m-d H:i:s');
+    $stats[$key]['total']++;
+    $stats[$key][$event] = (int)($stats[$key][$event] ?? 0) + 1;
+    $stats[$key]['records'][] = ['time' => date('H:i:s'), 'event' => $event];
+    if (count($stats[$key]['records']) > 200) {
+        $stats[$key]['records'] = array_slice($stats[$key]['records'], -200);
+    }
+
+    @file_put_contents($file, json_encode($stats, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), LOCK_EX);
+    return ['ok' => true, 'msg' => 'ok'];
+}
+
 function getStatsDateList(string $dir, int $limit = 30): array {
     if (!is_dir($dir)) return [];
     $files = glob("$dir/*.json");
@@ -648,7 +694,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['act'])) {
 
     if ($act === 'stats') {
         $date = trim((string)($_GET['date'] ?? date('Y-m-d')));
-        $stats = readDayStats($STATS_DIR, $date);
+        $stats = readDayStats($FP_ENV_STATS_DIR, $date);
         $api1Remarks = accountRemarkMap(readApi1AllowedAccounts($API1_ACCOUNTS_FILE));
         $api2Remarks = accountRemarkMap(readApi1AllowedAccounts($API2_ACCOUNTS_FILE));
         $summary = [];
@@ -667,18 +713,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['act'])) {
                 'fingerprint_name' => $info['fingerprint_name'] ?? '',
                 'last_seen' => $info['last_seen'] ?? '',
                 'total' => $info['total'] ?? 0,
-                'success' => $info['success'] ?? 0,
-                'fail' => $info['fail'] ?? 0,
+                'generate' => $info['generate'] ?? 0,
+                'use' => $info['use'] ?? 0,
                 'records' => $info['records'] ?? [],
             ];
         }
         usort($summary, fn($a, $b) => $b['total'] - $a['total']);
-        jsonResp(['ok' => true, 'date' => $date, 'dates' => getStatsDateList($STATS_DIR), 'data' => $summary]);
+        jsonResp(['ok' => true, 'date' => $date, 'dates' => getStatsDateList($FP_ENV_STATS_DIR), 'data' => $summary]);
     }
 
     if ($act === 'clear_stats') {
         $date = trim((string)($_GET['date'] ?? date('Y-m-d')));
-        $file = getStatsFile($STATS_DIR, $date);
+        $file = getStatsFile($FP_ENV_STATS_DIR, $date);
         if (is_file($file)) @unlink($file);
         jsonResp(['ok' => true, 'msg' => '统计已清除', 'date' => $date]);
     }
@@ -780,6 +826,10 @@ if ($postAct === 'api1_login') {
 
 if ($postAct === 'heartbeat') {
     jsonResp(updateDeviceHeartbeat($DEVICE_FILE, $input));
+}
+
+if ($postAct === 'fingerprint_event') {
+    jsonResp(recordFingerprintEnvEvent($FP_ENV_STATS_DIR, $input));
 }
 
 $apiType       = (int)($input['api_type'] ?? 0);
@@ -1343,14 +1393,13 @@ async function loadStats(){
     const fps=d.data||[];
     if(!fps.length){el.innerHTML='<div class="empty">当天暂无指纹调用记录</div>';return;}
     const tAll=fps.reduce((s,u)=>s+u.total,0);
-    let html=`<div class="stat-row" style="margin-bottom:16px"><div class="stat-card"><div class="label">日期</div><div class="value" style="font-size:18px">${esc(d.date)}</div></div><div class="stat-card"><div class="label">活跃指纹</div><div class="value blue">${fps.length}</div></div><div class="stat-card"><div class="label">总调用</div><div class="value">${tAll}</div></div><div class="stat-card"><div class="label">成功调用</div><div class="value green">${fps.reduce((s,u)=>s+u.success,0)}</div></div></div>`;
+    let html=`<div class="stat-row" style="margin-bottom:16px"><div class="stat-card"><div class="label">日期</div><div class="value" style="font-size:18px">${esc(d.date)}</div></div><div class="stat-card"><div class="label">活跃指纹</div><div class="value blue">${fps.length}</div></div><div class="stat-card"><div class="label">生成次数</div><div class="value">${fps.reduce((s,u)=>s+(u.generate||0),0)}</div></div><div class="stat-card"><div class="label">使用次数</div><div class="value green">${fps.reduce((s,u)=>s+(u.use||0),0)}</div></div></div>`;
     html+=fps.map(u=>{
-        const rate=u.total>0?((u.success/u.total)*100).toFixed(1):'0';
-        const last5=(u.records||[]).slice(-8).reverse().map(r=>`<span class="tag ${r.status==='success'?'tag-success':'tag-warning'}" style="margin-right:4px">${r.time} 接口${r.api} ${r.status}${r.task?' '+esc(r.task):''}</span>`).join('');
+        const last5=(u.records||[]).slice(-8).reverse().map(r=>`<span class="tag ${r.event==='use'?'tag-success':'tag-blue'}" style="margin-right:4px">${r.time} ${r.event==='use'?'设为使用':'生成'}</span>`).join('');
         const fpTitle=u.fingerprint_name||u.fingerprint_id||u.fingerprint_key||u.device_id||'unknown';
         const remark=u.account_remark?` <span style="color:var(--danger);font-weight:600">${esc(u.account_remark)}</span>`:'';
         const fpMeta=`账号:${esc(u.username||'-')}${remark} 组:${esc(u.group_id||'-')} 设备:${esc((u.device_id||'-').substring(0,16))} 指纹:${esc((u.fingerprint_id||u.fingerprint_key||'-').substring(0,16))} 最后:${esc(u.last_seen||'-')}`;
-        return `<div class="stats-user"><div class="stats-user-head"><div><b style="font-size:15px">${esc(fpTitle)}</b><div class="stats-records">${fpMeta}</div></div><div class="stats-nums"><span>调用 <b>${u.total}</b></span><span style="color:var(--success)">成功 <b>${u.success}</b></span><span style="color:var(--danger)">失败 <b>${u.fail}</b></span><span style="color:var(--primary)">成功率 <b>${rate}%</b></span></div></div>${last5?`<div class="stats-records">${last5}</div>`:''}</div>`;
+        return `<div class="stats-user"><div class="stats-user-head"><div><b style="font-size:15px">${esc(fpTitle)}</b><div class="stats-records">${fpMeta}</div></div><div class="stats-nums"><span>总计 <b>${u.total}</b></span><span style="color:var(--primary)">生成 <b>${u.generate||0}</b></span><span style="color:var(--success)">使用 <b>${u.use||0}</b></span></div></div>${last5?`<div class="stats-records">${last5}</div>`:''}</div>`;
     }).join('');
     el.innerHTML=html;
 }

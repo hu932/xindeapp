@@ -8,11 +8,14 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.app.helper.R
 import com.app.helper.databinding.ActivityFpManagerBinding
+import com.app.helper.network.ApiService
 import com.app.helper.util.FingerprintManager
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -43,6 +46,7 @@ class FpManagerActivity : AppCompatActivity() {
         val fp = FingerprintManager.generateFullFp(this)
         val name = fp.optString("name", "fp_${System.currentTimeMillis()}")
         FingerprintManager.saveFingerprintData(this, name, fp.toString())
+        reportFpEvent("generate", name, fp.toString())
         Toast.makeText(this, "已生成: $name", Toast.LENGTH_SHORT).show()
         refreshList()
     }
@@ -54,13 +58,16 @@ class FpManagerActivity : AppCompatActivity() {
             .setItems(counts) { _, which ->
                 val count = counts[which].toInt()
                 Thread {
+                    val generated = mutableListOf<Pair<String, String>>()
                     repeat(count) { i ->
                         val fp = FingerprintManager.generateFullFp(this)
                         val name = fp.optString("name", "fp_${System.currentTimeMillis()}_$i")
                         FingerprintManager.saveFingerprintData(this, name, fp.toString())
+                        generated.add(name to fp.toString())
                         Thread.sleep(10)
                     }
                     runOnUiThread {
+                        generated.forEach { (name, data) -> reportFpEvent("generate", name, data) }
                         Toast.makeText(this, "已批量生成 $count 个指纹", Toast.LENGTH_SHORT).show()
                         refreshList()
                     }
@@ -134,6 +141,9 @@ class FpManagerActivity : AppCompatActivity() {
                 when (which) {
                     0 -> {
                         FingerprintManager.setActiveFp(this, item.name)
+                        FingerprintManager.loadFingerprintData(this, item.name)?.let { data ->
+                            reportFpEvent("use", item.name, data)
+                        }
                         Toast.makeText(this, "已切换指纹: ${item.name}", Toast.LENGTH_SHORT).show()
                         refreshList()
                     }
@@ -188,6 +198,15 @@ class FpManagerActivity : AppCompatActivity() {
                 .show()
         } catch (e: Exception) {
             Toast.makeText(this, "解析失败: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun reportFpEvent(event: String, name: String, data: String) {
+        lifecycleScope.launch {
+            try {
+                ApiService.reportFingerprintEvent(event, name, data)
+            } catch (_: Exception) {
+            }
         }
     }
 }
