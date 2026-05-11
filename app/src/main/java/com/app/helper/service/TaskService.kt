@@ -313,7 +313,7 @@ class TaskService : android.app.Service() {
     private fun claimAndExecuteTask2() {
         serviceScope.launch {
             try {
-                val groupId = TokenManager.getGroupId()
+                val groupId = "${TokenManager.getGroupId()}_${TokenManager.getUsername()}"
                 val taskResponse = ApiService.takeTask2(groupId)
                 if (!taskResponse.ok || taskResponse.taskData == null) {
                     val msg = taskResponse.msg ?: "暂无任务"
