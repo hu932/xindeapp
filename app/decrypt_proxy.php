@@ -12,6 +12,7 @@ $AUTH_KEY = 'gejie2026';  // 前端查看密码
 $LOG_FILE = __DIR__ . '/decrypt_proxy_logs.jsonl';
 $DEVICE_FILE = __DIR__ . '/device_controls.json';
 $UPDATE_FILE = __DIR__ . '/app_update.json';
+$VERSION_CTRL_FILE = __DIR__ . '/version_controls.json';
 $APK_DIR = __DIR__ . '/app_updates';
 $STATS_DIR = __DIR__ . '/daily_stats';
 $FP_ENV_STATS_DIR = __DIR__ . '/fingerprint_env_stats';
@@ -414,6 +415,44 @@ function buildUpdateResponse(string $file, int $currentCode): array {
     ];
 }
 
+function readVersionControls(string $file): array {
+    $defaults = [
+        'min_version_code' => 0,
+        'min_version_msg' => '您的版本已停用，请更新到最新版本',
+        'blocked_versions' => [],
+        'updated_at' => '',
+    ];
+    if (!is_file($file)) return $defaults;
+    $data = json_decode((string)@file_get_contents($file), true);
+    return is_array($data) ? array_merge($defaults, $data) : $defaults;
+}
+
+function saveVersionControls(string $file, array $input): array {
+    $config = readVersionControls($file);
+    $config['min_version_code'] = max(0, (int)($input['min_version_code'] ?? $config['min_version_code']));
+    $config['min_version_msg'] = trim((string)($input['min_version_msg'] ?? $config['min_version_msg']));
+    if (isset($input['blocked_versions']) && is_array($input['blocked_versions'])) {
+        $config['blocked_versions'] = $input['blocked_versions'];
+    }
+    $config['updated_at'] = date('Y-m-d H:i:s');
+    @file_put_contents($file, json_encode($config, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), LOCK_EX);
+    return ['ok' => true, 'msg' => '版本控制已保存', 'data' => $config];
+}
+
+function checkVersionBlocked(string $file, int $versionCode): array {
+    $config = readVersionControls($file);
+    if ($config['min_version_code'] > 0 && $versionCode > 0 && $versionCode < $config['min_version_code']) {
+        return ['blocked' => true, 'message' => $config['min_version_msg'] ?: '您的版本已停用，请更新到最新版本'];
+    }
+    $blocked = $config['blocked_versions'] ?? [];
+    $key = (string)$versionCode;
+    if (isset($blocked[$key])) {
+        $msg = is_array($blocked[$key]) ? ($blocked[$key]['message'] ?? '') : (string)$blocked[$key];
+        return ['blocked' => true, 'message' => $msg ?: '此版本已停用，请更新'];
+    }
+    return ['blocked' => false];
+}
+
 function jsonDecodeAssoc(string $json): ?array {
     $decoded = json_decode($json, true);
     return json_last_error() === JSON_ERROR_NONE && is_array($decoded) ? $decoded : null;
@@ -564,8 +603,8 @@ function recordStats(string $dir, array $input, int $apiType, string $status, st
 
 function recordFingerprintEnvEvent(string $dir, array $input): array {
     $event = trim((string)($input['event'] ?? ''));
-    if (!in_array($event, ['generate', 'use'], true)) {
-        return ['ok' => false, 'msg' => '未知指纹事件'];
+    if (!in_array($event, ['generate', 'write'], true)) {
+        return ['ok' => false, 'msg' => '未知指纹事件，仅支持 generate/write'];
     }
 
     $date = date('Y-m-d');
@@ -584,9 +623,14 @@ function recordFingerprintEnvEvent(string $dir, array $input): array {
             'device_id' => $fp['device_id'],
             'total' => 0,
             'generate' => 0,
-            'use' => 0,
+            'write' => 0,
             'records' => [],
         ];
+    }
+
+    if (isset($stats[$key]['use']) && !isset($stats[$key]['write'])) {
+        $stats[$key]['write'] = (int)$stats[$key]['use'];
+        unset($stats[$key]['use']);
     }
 
     $stats[$key]['fingerprint_key'] = $fp['fingerprint_key'];
@@ -630,7 +674,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['act'])) {
 
     if ($act === 'check_update') {
         $currentCode = (int)($_GET['version_code'] ?? 0);
-        jsonResp(buildUpdateResponse($UPDATE_FILE, $currentCode));
+        $resp = buildUpdateResponse($UPDATE_FILE, $currentCode);
+        $vCheck = checkVersionBlocked($VERSION_CTRL_FILE, $currentCode);
+        $resp['blocked'] = !empty($vCheck['blocked']);
+        $resp['blocked_msg'] = $vCheck['message'] ?? '';
+        if ($resp['blocked']) $resp['force'] = true;
+        jsonResp($resp);
     }
 
     $key = $_GET['key'] ?? '';
@@ -676,6 +725,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['act'])) {
         jsonResp(saveUpdateConfig($UPDATE_FILE, $_GET));
     }
 
+    if ($act === 'version_controls') {
+        jsonResp(['ok' => true, 'data' => readVersionControls($VERSION_CTRL_FILE)]);
+    }
+
+    if ($act === 'save_version_controls') {
+        $input = [
+            'min_version_code' => (int)($_GET['min_version_code'] ?? 0),
+            'min_version_msg' => trim((string)($_GET['min_version_msg'] ?? '')),
+        ];
+        $blockedJson = (string)($_GET['blocked_versions'] ?? '');
+        if ($blockedJson !== '') {
+            $parsed = json_decode($blockedJson, true);
+            if (is_array($parsed)) $input['blocked_versions'] = $parsed;
+        }
+        jsonResp(saveVersionControls($VERSION_CTRL_FILE, $input));
+    }
+
     if ($act === 'api1_accounts') {
         jsonResp(['ok' => true, 'data' => readApi1AllowedAccounts($API1_ACCOUNTS_FILE)]);
     }
@@ -714,7 +780,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['act'])) {
                 'last_seen' => $info['last_seen'] ?? '',
                 'total' => $info['total'] ?? 0,
                 'generate' => $info['generate'] ?? 0,
-                'use' => $info['use'] ?? 0,
+                'write' => $info['write'] ?? $info['use'] ?? 0,
                 'records' => $info['records'] ?? [],
             ];
         }
@@ -1164,6 +1230,11 @@ pre.resp{background:#f5f5f5;padding:10px;border-radius:4px;font-size:12px;overfl
 .empty{text-align:center;padding:40px;color:var(--muted)}
 .hidden{display:none !important}
 @media(max-width:768px){.sidebar{width:0;overflow:hidden}.main{margin-left:0}.stat-row{grid-template-columns:repeat(2,1fr)}.form-grid{grid-template-columns:1fr}}
+
+.modal-mask{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.45);z-index:200;display:flex;align-items:center;justify-content:center}
+.modal-box{background:#fff;border-radius:8px;padding:24px;width:480px;max-width:90vw;max-height:80vh;overflow-y:auto;box-shadow:0 4px 20px rgba(0,0,0,.2)}
+.modal-box h3{margin-bottom:16px;font-size:16px}
+.modal-footer{margin-top:16px;display:flex;justify-content:flex-end;gap:10px}
 </style>
 </head>
 <body>
@@ -1189,6 +1260,7 @@ pre.resp{background:#f5f5f5;padding:10px;border-radius:4px;font-size:12px;overfl
         <div class="menu-item" onclick="switchPage('stats',this)"><i class="menu-icon">&#9733;</i>环境统计</div>
         <div class="menu-item" onclick="switchPage('accounts',this)"><i class="menu-icon">&#9737;</i>接口1账号</div>
         <div class="menu-item" onclick="switchPage('update',this)"><i class="menu-icon">&#8679;</i>更新发布</div>
+        <div class="menu-item" onclick="switchPage('verctrl',this)"><i class="menu-icon">&#9881;</i>版本控制</div>
         <div class="menu-item" onclick="switchPage('data',this)"><i class="menu-icon">&#128196;</i>解密数据</div>
     </div>
 </div>
@@ -1225,7 +1297,28 @@ pre.resp{background:#f5f5f5;padding:10px;border-radius:4px;font-size:12px;overfl
 
     <!-- Accounts -->
     <div class="page hidden" id="page-accounts">
-        <div class="card"><div class="card-head"><h3>接口账号备注</h3></div><div class="card-body"><div class="form-grid"><div class="form-item"><label>接口1允许账号。每行：账号 备注，未设置账号会拒绝登录</label><textarea id="api1Accounts" style="min-height:260px;font-family:monospace"></textarea></div><div class="form-item"><label>接口2账号备注。每行：账号 备注，用于在线设备和统计显示</label><textarea id="api2Accounts" style="min-height:260px;font-family:monospace"></textarea></div></div><div style="margin-top:14px;display:flex;gap:10px;align-items:center"><button class="btn btn-primary" onclick="saveApiAccounts()">保存账号备注</button><span id="apiAccountsResult" style="font-size:13px;color:var(--muted)"></span></div></div></div>
+        <div class="form-grid">
+        <div class="card">
+            <div class="card-head">
+                <h3>接口1账号白名单 <span id="api1Count" style="font-size:13px;color:var(--muted)"></span></h3>
+                <div class="card-toolbar">
+                    <button class="btn btn-primary btn-sm" onclick="showAddAccount(1)">单独添加</button>
+                    <button class="btn btn-info btn-sm" onclick="showBatchAdd(1)">批量添加</button>
+                </div>
+            </div>
+            <div class="card-body" style="padding:0"><div style="font-size:12px;color:var(--muted);padding:10px 12px 0">未设置账号会拒绝登录</div><div id="api1Table"><div class="empty">加载中...</div></div></div>
+        </div>
+        <div class="card">
+            <div class="card-head">
+                <h3>接口2账号备注 <span id="api2Count" style="font-size:13px;color:var(--muted)"></span></h3>
+                <div class="card-toolbar">
+                    <button class="btn btn-primary btn-sm" onclick="showAddAccount(2)">单独添加</button>
+                    <button class="btn btn-info btn-sm" onclick="showBatchAdd(2)">批量添加</button>
+                </div>
+            </div>
+            <div class="card-body" style="padding:0"><div style="font-size:12px;color:var(--muted);padding:10px 12px 0">用于在线设备和统计显示</div><div id="api2Table"><div class="empty">加载中...</div></div></div>
+        </div>
+        </div>
     </div>
 
     <!-- Update -->
@@ -1233,11 +1326,45 @@ pre.resp{background:#f5f5f5;padding:10px;border-radius:4px;font-size:12px;overfl
         <div class="card"><div class="card-head"><h3>在线更新发布</h3></div><div class="card-body"><div id="updateBody"><div class="empty">加载中...</div></div></div></div>
     </div>
 
+    <!-- Version Control -->
+    <div class="page hidden" id="page-verctrl">
+        <div class="card">
+            <div class="card-head"><h3>版本控制</h3></div>
+            <div class="card-body">
+                <div style="background:#fffbe6;border:1px dashed #ffe58f;padding:10px 14px;border-radius:4px;margin-bottom:16px;font-size:13px;color:#666">低于最低版本号的App将被强制停用；也可单独停用指定版本。App检测到停用后弹窗提示并要求更新。</div>
+                <div class="form-grid" style="margin-bottom:20px">
+                    <div class="form-item"><label>最低允许版本号 (versionCode)</label><input id="vcMinCode" type="number" min="0" value="0" placeholder="0表示不限制"></div>
+                    <div class="form-item"><label>低版本停用提示语</label><input id="vcMinMsg" value="" placeholder="您的版本已停用，请更新到最新版本"></div>
+                </div>
+                <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px">
+                    <button class="btn btn-primary" onclick="saveVerCtrl()">保存设置</button>
+                    <span id="vcResult" style="font-size:13px;color:var(--muted)"></span>
+                </div>
+                <div class="card" style="margin-top:10px">
+                    <div class="card-head"><h3>单独停用版本</h3><div class="card-toolbar"><button class="btn btn-danger btn-sm" onclick="showAddBlockedVer()">添加停用版本</button></div></div>
+                    <div class="card-body" style="padding:0"><div id="blockedVerList"><div class="empty">暂无停用版本</div></div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Data -->
     <div class="page hidden" id="page-data">
         <div class="card"><div class="card-head"><h3>解密数据列表</h3><div class="card-toolbar"><button class="btn btn-info btn-sm" onclick="openLatestDump()">打开最新</button></div></div><div class="card-body"><div id="dumpList"><div class="empty">加载中...</div></div></div></div>
     </div>
 
+    </div>
+</div>
+</div>
+
+<!-- Account Modal -->
+<div class="modal-mask hidden" id="accountModal" onclick="if(event.target===this)closeAccountModal()">
+<div class="modal-box">
+    <h3 id="acctModalTitle">添加账号</h3>
+    <div id="acctModalBody"></div>
+    <div class="modal-footer">
+        <button class="btn btn-default" onclick="closeAccountModal()">取消</button>
+        <button class="btn btn-primary" onclick="acctModalConfirm()">确定</button>
     </div>
 </div>
 </div>
@@ -1268,7 +1395,7 @@ function showAdmin() {
 
 if (KEY) { fetch(BASE+'?act=logs&limit=1&key='+encodeURIComponent(KEY)).then(r=>r.json()).then(d=>{ if(d.ok!==false||d.msg!=='密码错误') showAdmin(); else { KEY=''; localStorage.removeItem('admin_key'); }}).catch(()=>{}); }
 
-const pageTitles = {dashboard:'仪表盘',logs:'转发日志',devices:'在线设备',stats:'指纹环境管理',accounts:'接口账号备注',update:'更新发布',data:'解密数据'};
+const pageTitles = {dashboard:'仪表盘',logs:'转发日志',devices:'在线设备',stats:'指纹环境管理',accounts:'接口账号备注',update:'更新发布',verctrl:'版本控制',data:'解密数据'};
 let currentPage = 'dashboard';
 function switchPage(name, el) {
     if (deviceTimer && name !== 'devices') { clearInterval(deviceTimer); deviceTimer = null; }
@@ -1284,6 +1411,7 @@ function switchPage(name, el) {
     else if (name==='stats') loadStats();
     else if (name==='accounts') loadApi1Accounts();
     else if (name==='update') loadUpdateConfig();
+    else if (name==='verctrl') loadVerCtrl();
     else if (name==='data') loadDumpList();
 }
 
@@ -1391,15 +1519,75 @@ async function loadStats(){
     if(d.dates&&d.dates.length){const cv=sel.value||d.date;sel.innerHTML=d.dates.map(dt=>`<option value="${dt}" ${dt===cv?'selected':''}>${dt}</option>`).join('');}
     const el=document.getElementById('statsBody');
     const fps=d.data||[];
-    if(!fps.length){el.innerHTML='<div class="empty">当天暂无指纹调用记录</div>';return;}
-    const tAll=fps.reduce((s,u)=>s+u.total,0);
-    let html=`<div class="stat-row" style="margin-bottom:16px"><div class="stat-card"><div class="label">日期</div><div class="value" style="font-size:18px">${esc(d.date)}</div></div><div class="stat-card"><div class="label">活跃指纹</div><div class="value blue">${fps.length}</div></div><div class="stat-card"><div class="label">生成次数</div><div class="value">${fps.reduce((s,u)=>s+(u.generate||0),0)}</div></div><div class="stat-card"><div class="label">使用次数</div><div class="value green">${fps.reduce((s,u)=>s+(u.use||0),0)}</div></div></div>`;
-    html+=fps.map(u=>{
-        const last5=(u.records||[]).slice(-8).reverse().map(r=>`<span class="tag ${r.event==='use'?'tag-success':'tag-blue'}" style="margin-right:4px">${r.time} ${r.event==='use'?'设为使用':'生成'}</span>`).join('');
-        const fpTitle=u.fingerprint_name||u.fingerprint_id||u.fingerprint_key||u.device_id||'unknown';
+    if(!fps.length){el.innerHTML='<div class="empty">当天暂无指纹记录</div>';return;}
+
+    // 按账号分组
+    const byUser={};
+    for(const fp of fps){
+        const u=fp.username||'unknown';
+        if(!byUser[u]) byUser[u]={username:u,account_remark:fp.account_remark||'',fingerprints:[],total:0,generate:0,write:0};
+        byUser[u].fingerprints.push(fp);
+        byUser[u].total+=fp.total||0;
+        byUser[u].generate+=fp.generate||0;
+        byUser[u].write+=fp.write||0;
+        if(fp.account_remark) byUser[u].account_remark=fp.account_remark;
+    }
+    const users=Object.values(byUser).sort((a,b)=>b.total-a.total);
+    const totalGen=fps.reduce((s,u)=>s+(u.generate||0),0);
+    const totalWrite=fps.reduce((s,u)=>s+(u.write||0),0);
+
+    let html=`<div class="stat-row" style="margin-bottom:16px">
+        <div class="stat-card"><div class="label">日期</div><div class="value" style="font-size:18px">${esc(d.date)}</div></div>
+        <div class="stat-card"><div class="label">活跃账号</div><div class="value blue">${users.length}</div></div>
+        <div class="stat-card"><div class="label">生成指纹</div><div class="value purple">${totalGen}</div></div>
+        <div class="stat-card"><div class="label">写入指纹(v32)</div><div class="value green">${totalWrite}</div></div>
+    </div>`;
+
+    html+=users.map(u=>{
         const remark=u.account_remark?` <span style="color:var(--danger);font-weight:600">${esc(u.account_remark)}</span>`:'';
-        const fpMeta=`账号:${esc(u.username||'-')}${remark} 组:${esc(u.group_id||'-')} 设备:${esc((u.device_id||'-').substring(0,16))} 指纹:${esc((u.fingerprint_id||u.fingerprint_key||'-').substring(0,16))} 最后:${esc(u.last_seen||'-')}`;
-        return `<div class="stats-user"><div class="stats-user-head"><div><b style="font-size:15px">${esc(fpTitle)}</b><div class="stats-records">${fpMeta}</div></div><div class="stats-nums"><span>总计 <b>${u.total}</b></span><span style="color:var(--primary)">生成 <b>${u.generate||0}</b></span><span style="color:var(--success)">使用 <b>${u.use||0}</b></span></div></div>${last5?`<div class="stats-records">${last5}</div>`:''}</div>`;
+
+        // 指纹明细表格
+        let fpTable='';
+        if(u.fingerprints.length>0){
+            fpTable=`<table style="margin-top:10px"><thead><tr><th>指纹名称</th><th>指纹ID</th><th>设备ID</th><th style="text-align:center">生成</th><th style="text-align:center">写入</th><th style="text-align:center">总计</th><th>最后活跃</th></tr></thead><tbody>`;
+            for(const fp of u.fingerprints.sort((a,b)=>b.total-a.total)){
+                const fpName=fp.fingerprint_name||'-';
+                const fpId=(fp.fingerprint_id||fp.fingerprint_key||'-').substring(0,20);
+                const devId=(fp.device_id||'-').substring(0,14);
+                fpTable+=`<tr>
+                    <td><b>${esc(fpName)}</b></td>
+                    <td><code style="font-size:11px">${esc(fpId)}</code></td>
+                    <td style="font-size:12px">${esc(devId)}</td>
+                    <td style="text-align:center;color:var(--info)">${fp.generate||0}</td>
+                    <td style="text-align:center;color:var(--success)">${fp.write||0}</td>
+                    <td style="text-align:center"><b>${fp.total||0}</b></td>
+                    <td style="font-size:12px;color:var(--muted)">${esc(fp.last_seen||'-')}</td>
+                </tr>`;
+            }
+            fpTable+='</tbody></table>';
+        }
+
+        // 最近操作记录
+        const allRec=u.fingerprints.flatMap(fp=>(fp.records||[]).map(r=>({...r,fp_name:fp.fingerprint_name||fp.fingerprint_id||''})));
+        allRec.sort((a,b)=>b.time.localeCompare(a.time));
+        const last8=allRec.slice(0,8).map(r=>
+            `<span class="tag ${r.event==='write'?'tag-success':'tag-blue'}" style="margin-right:4px">${r.time} ${r.event==='write'?'写入':'生成'}${r.fp_name?' '+esc(r.fp_name.substring(0,10)):''}</span>`
+        ).join('');
+
+        return `<div class="stats-user">
+            <div class="stats-user-head">
+                <div><b style="font-size:15px">${esc(u.username)}</b>${remark}
+                    <div class="stats-records">指纹数:${u.fingerprints.length} 组:${esc(u.fingerprints[0]?.group_id||'-')}</div>
+                </div>
+                <div class="stats-nums">
+                    <span>总计 <b>${u.total}</b></span>
+                    <span style="color:var(--info)">生成 <b>${u.generate}</b></span>
+                    <span style="color:var(--success)">写入 <b>${u.write}</b></span>
+                </div>
+            </div>
+            ${fpTable}
+            ${last8?`<div class="stats-records" style="margin-top:8px">${last8}</div>`:''}
+        </div>`;
     }).join('');
     el.innerHTML=html;
 }
@@ -1414,25 +1602,158 @@ async function clearStats(){
     loadStats();
 }
 
-// ===== API1 Accounts =====
+// ===== API Accounts =====
+let api1Data=[], api2Data=[];
+let acctModalMode='';
+
 async function loadApi1Accounts(){
     const [r1,r2]=await Promise.all([
         fetch(BASE+'?act=api1_accounts&key='+encodeURIComponent(KEY)).then(r=>r.json()),
         fetch(BASE+'?act=api2_accounts&key='+encodeURIComponent(KEY)).then(r=>r.json())
     ]);
-    if(r1.ok) document.getElementById('api1Accounts').value=(r1.data||[]).map(a=>`${a.username||a}${a.remark?' '+a.remark:''}`).join('\n');
-    if(r2.ok) document.getElementById('api2Accounts').value=(r2.data||[]).map(a=>`${a.username||a}${a.remark?' '+a.remark:''}`).join('\n');
-    document.getElementById('apiAccountsResult').textContent='已加载 接口1 '+((r1.data||[]).length)+' 个，接口2 '+((r2.data||[]).length)+' 个';
+    if(r1.ok){ api1Data=r1.data||[]; renderAccountTable(api1Data,'api1Table',1); }
+    if(r2.ok){ api2Data=r2.data||[]; renderAccountTable(api2Data,'api2Table',2); }
+    document.getElementById('api1Count').textContent='('+api1Data.length+'个)';
+    document.getElementById('api2Count').textContent='('+api2Data.length+'个)';
 }
-async function saveApiAccounts(){
-    const api1=document.getElementById('api1Accounts').value;
-    const api2=document.getElementById('api2Accounts').value;
-    document.getElementById('apiAccountsResult').textContent='保存中...';
-    const [d1,d2]=await Promise.all([
-        fetch(BASE+'?act=save_api1_accounts&key='+encodeURIComponent(KEY)+'&accounts='+encodeURIComponent(api1)).then(r=>r.json()),
-        fetch(BASE+'?act=save_api2_accounts&key='+encodeURIComponent(KEY)+'&accounts='+encodeURIComponent(api2)).then(r=>r.json())
-    ]);
-    document.getElementById('apiAccountsResult').textContent=(d1.ok&&d2.ok)?`已保存 接口1 ${d1.count||0} 个，接口2 ${d2.count||0} 个`:(d1.msg||d2.msg||'保存失败');
+
+function renderAccountTable(accounts, targetId, apiType){
+    const el=document.getElementById(targetId);
+    if(!accounts.length){el.innerHTML='<div class="empty">暂无账号</div>';return;}
+    el.innerHTML=`<table><thead><tr><th style="width:50px">#</th><th>账号</th><th>备注</th><th style="width:70px">操作</th></tr></thead><tbody>${
+        accounts.map((a,i)=>`<tr><td>${i+1}</td><td><code>${esc(a.username||a)}</code></td><td>${esc(a.remark||'-')}</td><td><button class="btn btn-danger btn-sm" onclick="deleteAccount(${apiType},'${escAttr(a.username||a)}')">删除</button></td></tr>`).join('')
+    }</tbody></table>`;
+}
+
+function showAddAccount(apiType){
+    acctModalMode='add'+apiType;
+    document.getElementById('acctModalTitle').textContent='添加接口'+apiType+'账号';
+    document.getElementById('acctModalBody').innerHTML=`
+        <div class="form-item" style="margin-bottom:12px"><label>账号</label><input id="acctInputName" placeholder="输入账号名" style="height:36px;border:1px solid #d9d9d9;border-radius:4px;padding:0 10px;font-size:14px;width:100%"></div>
+        <div class="form-item"><label>备注</label><input id="acctInputRemark" placeholder="备注（可选）" style="height:36px;border:1px solid #d9d9d9;border-radius:4px;padding:0 10px;font-size:14px;width:100%"></div>`;
+    document.getElementById('accountModal').classList.remove('hidden');
+    setTimeout(()=>{const inp=document.getElementById('acctInputName');if(inp)inp.focus();},100);
+}
+
+function showBatchAdd(apiType){
+    acctModalMode='batch'+apiType;
+    document.getElementById('acctModalTitle').textContent='批量添加接口'+apiType+'账号';
+    document.getElementById('acctModalBody').innerHTML=`
+        <div class="form-item"><label>每行一个账号，格式：账号 备注 或 账号|备注</label>
+        <textarea id="acctBatchInput" rows="10" placeholder="user1 备注1\nuser2|备注2\nuser3" style="height:220px;width:100%;border:1px solid #d9d9d9;border-radius:4px;padding:8px 10px;font-size:14px;resize:vertical;font-family:monospace"></textarea></div>`;
+    document.getElementById('accountModal').classList.remove('hidden');
+    setTimeout(()=>{const inp=document.getElementById('acctBatchInput');if(inp)inp.focus();},100);
+}
+
+function closeAccountModal(){
+    document.getElementById('accountModal').classList.add('hidden');
+    acctModalMode='';
+}
+
+async function acctModalConfirm(){
+    if(acctModalMode.startsWith('add')){
+        const apiType=parseInt(acctModalMode.replace('add',''));
+        const name=(document.getElementById('acctInputName').value||'').trim();
+        const remark=(document.getElementById('acctInputRemark').value||'').trim();
+        if(!name) return alert('请输入账号');
+        const data=apiType===1?api1Data:api2Data;
+        if(data.some(a=>(a.username||a)===name)) return alert('账号已存在');
+        data.push({username:name,remark:remark});
+        await saveAccountList(apiType,data);
+    }else if(acctModalMode.startsWith('batch')){
+        const apiType=parseInt(acctModalMode.replace('batch',''));
+        const text=(document.getElementById('acctBatchInput').value||'').trim();
+        if(!text) return alert('请输入账号');
+        const data=apiType===1?[...api1Data]:[...api2Data];
+        const existingNames=new Set(data.map(a=>a.username||a));
+        let added=0;
+        for(const line of text.split(/\r?\n/)){
+            const trimmed=line.trim();
+            if(!trimmed) continue;
+            let name,remark;
+            if(trimmed.includes('|')){[name,remark]=trimmed.split('|',2);}
+            else{const parts=trimmed.split(/\s+/,2);name=parts[0];remark=parts[1]||'';}
+            name=(name||'').trim(); remark=(remark||'').trim();
+            if(name&&!existingNames.has(name)){data.push({username:name,remark:remark});existingNames.add(name);added++;}
+        }
+        if(apiType===1) api1Data=data; else api2Data=data;
+        await saveAccountList(apiType,data);
+        alert('已添加 '+added+' 个账号');
+    }
+    closeAccountModal();
+    loadApi1Accounts();
+}
+
+async function deleteAccount(apiType,username){
+    if(!confirm('确定删除账号 '+username+' ?')) return;
+    let data=apiType===1?api1Data:api2Data;
+    data=data.filter(a=>(a.username||a)!==username);
+    if(apiType===1) api1Data=data; else api2Data=data;
+    await saveAccountList(apiType,data);
+    loadApi1Accounts();
+}
+
+async function saveAccountList(apiType,data){
+    const text=data.map(a=>(a.username||a)+(a.remark?'|'+a.remark:'')).join('\n');
+    const act=apiType===1?'save_api1_accounts':'save_api2_accounts';
+    await fetch(BASE+'?act='+act+'&key='+encodeURIComponent(KEY)+'&accounts='+encodeURIComponent(text));
+}
+
+// ===== Version Control =====
+let vcBlockedVersions={};
+
+async function loadVerCtrl(){
+    const r=await fetch(BASE+'?act=version_controls&key='+encodeURIComponent(KEY));
+    const d=await r.json();
+    if(!d.ok)return;
+    const c=d.data||{};
+    document.getElementById('vcMinCode').value=c.min_version_code||0;
+    document.getElementById('vcMinMsg').value=c.min_version_msg||'';
+    vcBlockedVersions=c.blocked_versions||{};
+    document.getElementById('vcResult').textContent=c.updated_at?'上次保存: '+c.updated_at:'';
+    renderBlockedVersions();
+}
+
+function renderBlockedVersions(){
+    const el=document.getElementById('blockedVerList');
+    const keys=Object.keys(vcBlockedVersions).sort((a,b)=>Number(a)-Number(b));
+    if(!keys.length){el.innerHTML='<div class="empty">暂无单独停用的版本</div>';return;}
+    el.innerHTML=`<table><thead><tr><th style="width:50px">#</th><th>版本号 (versionCode)</th><th>停用提示语</th><th style="width:70px">操作</th></tr></thead><tbody>${
+        keys.map((k,i)=>{
+            const v=vcBlockedVersions[k];
+            const msg=typeof v==='object'?(v.message||''):(typeof v==='string'?v:'');
+            return `<tr><td>${i+1}</td><td><b>${esc(k)}</b></td><td>${esc(msg||'此版本已停用，请更新')}</td><td><button class="btn btn-success btn-sm" onclick="removeBlockedVer('${escAttr(k)}')">移除</button></td></tr>`;
+        }).join('')
+    }</tbody></table>`;
+}
+
+function showAddBlockedVer(){
+    const code=prompt('输入要停用的版本号 (versionCode)','');
+    if(!code||isNaN(Number(code)))return;
+    const msg=prompt('停用提示语（App会显示给用户）','此版本已停用，请更新到最新版本');
+    if(msg===null)return;
+    vcBlockedVersions[String(Number(code))]={message:msg};
+    renderBlockedVersions();
+}
+
+function removeBlockedVer(code){
+    if(!confirm('确定移除版本 '+code+' 的停用限制？'))return;
+    delete vcBlockedVersions[code];
+    renderBlockedVersions();
+}
+
+async function saveVerCtrl(){
+    const minCode=document.getElementById('vcMinCode').value||'0';
+    const minMsg=document.getElementById('vcMinMsg').value||'';
+    document.getElementById('vcResult').textContent='保存中...';
+    const params=new URLSearchParams({
+        act:'save_version_controls',key:KEY,
+        min_version_code:minCode,min_version_msg:minMsg,
+        blocked_versions:JSON.stringify(vcBlockedVersions)
+    });
+    const r=await fetch(BASE+'?'+params.toString());
+    const d=await r.json();
+    document.getElementById('vcResult').textContent=d.msg||(d.ok?'已保存':'保存失败');
 }
 
 // ===== Update =====

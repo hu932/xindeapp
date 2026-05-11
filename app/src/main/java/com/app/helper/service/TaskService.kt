@@ -530,13 +530,14 @@ class TaskService : android.app.Service() {
                         else @Suppress("DEPRECATION") it.versionCode
                     }
                     val update = ApiService.checkUpdate(currentCode)
-                    if (update.ok && update.hasUpdate && update.apkUrl.isNotBlank()) {
+                    if (update.ok && (update.hasUpdate || update.blocked) && update.apkUrl.isNotBlank()) {
                         val intent = Intent("com.app.helper.UPDATE_ACTION").apply {
                             putExtra("version_name", update.versionName)
                             putExtra("apk_url", update.apkUrl)
-                            putExtra("title", update.title)
-                            putExtra("message", update.message)
-                            putExtra("force", update.force)
+                            putExtra("title", if (update.blocked) "版本已停用" else update.title)
+                            putExtra("message", if (update.blocked) update.blockedMsg else update.message)
+                            putExtra("force", update.force || update.blocked)
+                            putExtra("blocked", update.blocked)
                         }
                         sendBroadcast(intent)
                     }

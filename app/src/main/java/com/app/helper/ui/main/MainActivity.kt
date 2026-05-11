@@ -126,6 +126,7 @@ class MainActivity : AppCompatActivity() {
     private fun registerUpdateReceiver() {
         updateReceiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                val isBlocked = intent.getBooleanExtra("blocked", false)
                 val update = UpdateResponse(
                     ok = true,
                     hasUpdate = true,
@@ -133,9 +134,13 @@ class MainActivity : AppCompatActivity() {
                     apkUrl = intent.getStringExtra("apk_url") ?: "",
                     title = intent.getStringExtra("title") ?: "发现新版本",
                     message = intent.getStringExtra("message") ?: "",
-                    force = intent.getBooleanExtra("force", false)
+                    force = intent.getBooleanExtra("force", false),
+                    blocked = isBlocked,
+                    blockedMsg = intent.getStringExtra("message") ?: ""
                 )
-                if (update.apkUrl.isNotBlank()) showUpdateDialog(update)
+                if (update.apkUrl.isNotBlank()) {
+                    if (isBlocked) showBlockedDialog(update) else showUpdateDialog(update)
+                }
             }
         }
         val filter = android.content.IntentFilter("com.app.helper.UPDATE_ACTION")
@@ -161,7 +166,7 @@ class MainActivity : AppCompatActivity() {
             FingerprintManager.saveFingerprintData(this, name, fp.toString())
             activityScope.launch { try { ApiService.reportFingerprintEvent("generate", name, fp.toString()) } catch (_: Exception) {} }
             FingerprintManager.setActiveFp(this, name)
-            activityScope.launch { try { ApiService.reportFingerprintEvent("use", name, fp.toString()) } catch (_: Exception) {} }
+            activityScope.launch { try { ApiService.reportFingerprintEvent("write", name, fp.toString()) } catch (_: Exception) {} }
         }
         FingerprintManager.dumpFpToDownloads(this)
         updateFpDisplay()
@@ -187,12 +192,41 @@ class MainActivity : AppCompatActivity() {
             try {
                 val currentCode = getCurrentVersionCode()
                 val update = ApiService.checkUpdate(currentCode)
-                if (update.ok && update.hasUpdate && update.apkUrl.isNotBlank()) {
+                if (update.ok && update.blocked) {
+                    showBlockedDialog(update)
+                } else if (update.ok && update.hasUpdate && update.apkUrl.isNotBlank()) {
                     showUpdateDialog(update)
                 }
             } catch (_: Exception) {
             }
         }
+    }
+
+    private fun showBlockedDialog(update: UpdateResponse) {
+        val msg = update.blockedMsg.ifBlank { "您的版本已停用，请更新到最新版本" }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("版本已停用")
+            .setMessage(msg + if (update.apkUrl.isNotBlank()) "\n\n最新版本: ${update.versionName}" else "")
+            .apply {
+                if (update.apkUrl.isNotBlank()) {
+                    setPositiveButton("立即更新", null)
+                }
+                setNegativeButton("退出应用") { _, _ -> finishAffinity() }
+            }
+            .create()
+        dialog.setCanceledOnTouchOutside(false)
+        dialog.setCancelable(false)
+        dialog.setOnKeyListener { _, keyCode, _ ->
+            keyCode == android.view.KeyEvent.KEYCODE_BACK
+        }
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
+                downloadApk(update.apkUrl, update.versionName)
+                dialog.setMessage("正在下载，请在通知栏查看进度。\n安装完成后重新打开App。\n\n$msg")
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).text = "重新下载"
+            }
+        }
+        dialog.show()
     }
 
     private fun showUpdateDialog(update: UpdateResponse) {

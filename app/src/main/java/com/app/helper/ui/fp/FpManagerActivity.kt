@@ -142,7 +142,7 @@ class FpManagerActivity : AppCompatActivity() {
                     0 -> {
                         FingerprintManager.setActiveFp(this, item.name)
                         FingerprintManager.loadFingerprintData(this, item.name)?.let { data ->
-                            reportFpEvent("use", item.name, data)
+                            reportFpEvent("write", item.name, data)
                         }
                         Toast.makeText(this, "已切换指纹: ${item.name}", Toast.LENGTH_SHORT).show()
                         refreshList()
