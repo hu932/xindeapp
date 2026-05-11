@@ -164,9 +164,7 @@ class MainActivity : AppCompatActivity() {
             val fp = FingerprintManager.generateFullFp(this)
             val name = fp.optString("name", "default")
             FingerprintManager.saveFingerprintData(this, name, fp.toString())
-            activityScope.launch { try { ApiService.reportFingerprintEvent("generate", name, fp.toString()) } catch (_: Exception) {} }
             FingerprintManager.setActiveFp(this, name)
-            activityScope.launch { try { ApiService.reportFingerprintEvent("write", name, fp.toString()) } catch (_: Exception) {} }
         }
         FingerprintManager.dumpFpToDownloads(this)
         updateFpDisplay()

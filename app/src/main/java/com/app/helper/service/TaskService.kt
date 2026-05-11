@@ -70,6 +70,8 @@ class TaskService : android.app.Service() {
     private var heartbeatJob: Job? = null
     @Volatile private var deviceAllowed = true
     @Volatile private var deviceBlockedMsg = "设备已被禁用"
+    @Volatile private var versionBlocked = false
+    @Volatile private var versionBlockedMsg = "版本已停用，请更新"
     private var consecutiveTimeouts = 0
 
     private var touchDownX = 0f
@@ -209,6 +211,18 @@ class TaskService : android.app.Service() {
 
     private fun toggleAutoTask() {
         if (isUploading) { updateFloatStatus("正在上传中..."); return }
+        if (versionBlocked) {
+            isAutoRunning = false
+            handler.post { tvAction?.text = "一键做任务" }
+            updateFloatStatus("$versionBlockedMsg\n请更新到最新版本后使用")
+            sendBroadcast(Intent("com.app.helper.UPDATE_ACTION").apply {
+                putExtra("title", "版本已停用")
+                putExtra("message", versionBlockedMsg)
+                putExtra("force", true)
+                putExtra("blocked", true)
+            })
+            return
+        }
         if (!deviceAllowed) {
             stopAutoForDeviceBlock()
             return
@@ -230,6 +244,12 @@ class TaskService : android.app.Service() {
 
     private fun startNextTaskCycle() {
         if (!isAutoRunning) return
+        if (versionBlocked) {
+            isAutoRunning = false
+            handler.post { tvAction?.text = "一键做任务" }
+            updateFloatStatus("$versionBlockedMsg\n已停止自动执行")
+            return
+        }
         if (!deviceAllowed) {
             stopAutoForDeviceBlock()
             return
@@ -522,7 +542,7 @@ class TaskService : android.app.Service() {
     private fun startUpdateCheck() {
         updateCheckJob?.cancel()
         updateCheckJob = serviceScope.launch {
-            delay(30 * 60_000L)
+            delay(5_000L)
             while (isActive) {
                 try {
                     val currentCode = packageManager.getPackageInfo(packageName, 0).let {
@@ -530,6 +550,18 @@ class TaskService : android.app.Service() {
                         else @Suppress("DEPRECATION") it.versionCode
                     }
                     val update = ApiService.checkUpdate(currentCode)
+                    if (update.ok && update.blocked) {
+                        versionBlocked = true
+                        versionBlockedMsg = update.blockedMsg.ifBlank { "版本已停用，请更新" }
+                        if (isAutoRunning) {
+                            isAutoRunning = false
+                            countdownJob?.cancel()
+                            handler.post { tvAction?.text = "一键做任务" }
+                            updateFloatStatus("$versionBlockedMsg\n已停止自动执行")
+                        }
+                    } else {
+                        versionBlocked = false
+                    }
                     if (update.ok && (update.hasUpdate || update.blocked) && update.apkUrl.isNotBlank()) {
                         val intent = Intent("com.app.helper.UPDATE_ACTION").apply {
                             putExtra("version_name", update.versionName)
