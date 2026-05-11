@@ -14,7 +14,15 @@ $DEVICE_FILE = __DIR__ . '/device_controls.json';
 $UPDATE_FILE = __DIR__ . '/app_update.json';
 $APK_DIR = __DIR__ . '/app_updates';
 $STATS_DIR = __DIR__ . '/daily_stats';
+$API1_TOKEN_FILE = __DIR__ . '/api1_token.json';
+$API1_ACCOUNTS_FILE = __DIR__ . '/api1_allowed_accounts.json';
 $MAX_LOGS = 500;
+
+$API1_AUTH = [
+    'login_url' => 'https://eqwofaygdsjko.uk:443/api/user/login',
+    'username'  => 'youngdenise',
+    'password'  => '@dzaM3mT9I',
+];
 
 $TARGETS = [
     1 => [
@@ -39,8 +47,11 @@ function aesDecrypt(string $encrypted, string $key): ?string {
     return $plain === false ? null : $plain;
 }
 
-function forwardToServer(string $url, string $body, bool $gzip): array {
+function forwardToServer(string $url, string $body, bool $gzip, array $extraHeaders = []): array {
     $headers = ['Content-Type: application/json; charset=utf-8', 'Accept: application/json'];
+    foreach ($extraHeaders as $header) {
+        if (is_string($header) && $header !== '') $headers[] = $header;
+    }
     $postData = $body;
     if ($gzip) {
         $postData = gzencode($body);
@@ -58,6 +69,113 @@ function forwardToServer(string $url, string $body, bool $gzip): array {
     $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
     return ['response' => $response, 'error' => $error, 'http_code' => $httpCode, 'headers' => $headers];
+}
+
+function jwtExp(string $token): int {
+    $parts = explode('.', $token);
+    if (count($parts) < 2) return 0;
+    $payload = strtr($parts[1], '-_', '+/');
+    $payload .= str_repeat('=', (4 - strlen($payload) % 4) % 4);
+    $decoded = base64_decode($payload, true);
+    if ($decoded === false) return 0;
+    $data = json_decode($decoded, true);
+    return is_array($data) ? (int)($data['exp'] ?? 0) : 0;
+}
+
+function getApi1Token(array $auth, string $tokenFile, bool $forceRefresh = false): array {
+    if (!$forceRefresh && is_file($tokenFile)) {
+        $cached = json_decode((string)@file_get_contents($tokenFile), true);
+        $token = is_array($cached) ? (string)($cached['token'] ?? '') : '';
+        $expiresAt = is_array($cached) ? (int)($cached['expires_at'] ?? 0) : 0;
+        if ($token !== '' && $expiresAt > time() + 60) {
+            return ['ok' => true, 'token' => $token, 'cached' => true, 'expires_at' => $expiresAt];
+        }
+    }
+
+    $body = json_encode([
+        'username' => (string)($auth['username'] ?? ''),
+        'password' => (string)($auth['password'] ?? ''),
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+    $ch = curl_init((string)($auth['login_url'] ?? ''));
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $body,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Accept: */*'],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 15,
+        CURLOPT_CONNECTTIMEOUT => 10,
+        CURLOPT_SSL_VERIFYPEER => false,
+    ]);
+    $response = curl_exec($ch);
+    $error = curl_error($ch);
+    $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($error) return ['ok' => false, 'msg' => '接口1登录失败: ' . $error, 'http_code' => $httpCode];
+    $json = json_decode((string)$response, true);
+    $token = is_array($json) ? (string)($json['data']['token'] ?? '') : '';
+    if ($token === '') {
+        return ['ok' => false, 'msg' => '接口1登录未返回token', 'http_code' => $httpCode, 'response' => $json ?? $response];
+    }
+
+    $expiresAt = jwtExp($token);
+    if ($expiresAt <= 0) $expiresAt = time() + 3600;
+    @file_put_contents($tokenFile, json_encode([
+        'token' => $token,
+        'expires_at' => $expiresAt,
+        'updated_at' => date('Y-m-d H:i:s'),
+    ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), LOCK_EX);
+
+    return ['ok' => true, 'token' => $token, 'cached' => false, 'expires_at' => $expiresAt];
+}
+
+function readApi1AllowedAccounts(string $file): array {
+    if (!is_file($file)) return [];
+    $data = json_decode((string)@file_get_contents($file), true);
+    if (!is_array($data)) return [];
+    $accounts = $data['accounts'] ?? $data;
+    if (!is_array($accounts)) return [];
+    $result = [];
+    foreach ($accounts as $account) {
+        $name = trim((string)$account);
+        if ($name !== '') $result[$name] = true;
+    }
+    return array_keys($result);
+}
+
+function saveApi1AllowedAccounts(string $file, array $accounts): array {
+    $clean = [];
+    foreach ($accounts as $account) {
+        $name = trim((string)$account);
+        if ($name !== '') $clean[$name] = true;
+    }
+    $list = array_keys($clean);
+    sort($list);
+    @file_put_contents($file, json_encode([
+        'accounts' => $list,
+        'updated_at' => date('Y-m-d H:i:s'),
+    ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), LOCK_EX);
+    return ['ok' => true, 'data' => $list, 'count' => count($list)];
+}
+
+function api1LoginWithPassword(string $url, string $username, string $password): array {
+    $body = json_encode(['username' => $username, 'password' => $password], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $body,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Accept: */*'],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 15,
+        CURLOPT_CONNECTTIMEOUT => 10,
+        CURLOPT_SSL_VERIFYPEER => false,
+    ]);
+    $response = curl_exec($ch);
+    $error = curl_error($ch);
+    $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    return ['response' => $response, 'error' => $error, 'http_code' => $httpCode];
 }
 
 function appendLog(string $file, array $entry, int $max): void {
@@ -118,6 +236,9 @@ function updateDeviceHeartbeat(string $file, array $input): array {
         'username' => $username,
         'group_id' => $groupId,
         'device_id' => $deviceId,
+        'fingerprint_key' => trim((string)($input['fingerprint_key'] ?? '')),
+        'fingerprint_id' => trim((string)($input['fingerprint_id'] ?? '')),
+        'fingerprint_name' => trim((string)($input['fingerprint_name'] ?? '')),
         'api_type' => (int)($input['api_type'] ?? ($old['api_type'] ?? 0)),
         'ip' => $_SERVER['REMOTE_ADDR'] ?? '',
         'last_seen' => date('Y-m-d H:i:s'),
@@ -325,25 +446,69 @@ function readDayStats(string $dir, string $date = ''): array {
     return is_array($data) ? $data : [];
 }
 
-function recordStats(string $dir, string $username, int $apiType, string $status, string $taskId = ''): void {
+function fingerprintInfoFromInput(array $input): array {
+    $username = trim((string)($input['username'] ?? $input['用户名'] ?? 'unknown'));
+    $groupId = trim((string)($input['group_id'] ?? $input['组ID'] ?? ''));
+    $deviceId = trim((string)($input['device_id'] ?? $input['设备ID'] ?? ''));
+    $fpKey = trim((string)($input['fingerprint_key'] ?? ''));
+    $fpId = trim((string)($input['fingerprint_id'] ?? ''));
+    $fpName = trim((string)($input['fingerprint_name'] ?? ''));
+
+    if ($fpKey === '') $fpKey = $fpId;
+    if ($fpKey === '') $fpKey = $fpName;
+    if ($fpKey === '') $fpKey = $deviceId;
+    if ($fpKey === '') $fpKey = 'unknown-' . substr(md5($username . '|' . ($_SERVER['REMOTE_ADDR'] ?? '')), 0, 10);
+
+    return [
+        'key' => md5($username . '|' . $fpKey),
+        'fingerprint_key' => $fpKey,
+        'fingerprint_id' => $fpId,
+        'fingerprint_name' => $fpName,
+        'username' => $username,
+        'group_id' => $groupId,
+        'device_id' => $deviceId,
+    ];
+}
+
+function recordStats(string $dir, array $input, int $apiType, string $status, string $taskId = ''): void {
     $date = date('Y-m-d');
     $file = getStatsFile($dir, $date);
     $stats = readDayStats($dir, $date);
+    $fp = fingerprintInfoFromInput($input);
+    $key = $fp['key'];
 
-    if (!isset($stats[$username])) {
-        $stats[$username] = ['total' => 0, 'success' => 0, 'fail' => 0, 'records' => []];
+    if (!isset($stats[$key])) {
+        $stats[$key] = [
+            'fingerprint_key' => $fp['fingerprint_key'],
+            'fingerprint_id' => $fp['fingerprint_id'],
+            'fingerprint_name' => $fp['fingerprint_name'],
+            'username' => $fp['username'],
+            'group_id' => $fp['group_id'],
+            'device_id' => $fp['device_id'],
+            'total' => 0,
+            'success' => 0,
+            'fail' => 0,
+            'records' => [],
+        ];
     }
-    $stats[$username]['total']++;
+    $stats[$key]['fingerprint_key'] = $fp['fingerprint_key'];
+    $stats[$key]['fingerprint_id'] = $fp['fingerprint_id'];
+    $stats[$key]['fingerprint_name'] = $fp['fingerprint_name'];
+    $stats[$key]['username'] = $fp['username'];
+    $stats[$key]['group_id'] = $fp['group_id'];
+    $stats[$key]['device_id'] = $fp['device_id'];
+    $stats[$key]['last_seen'] = date('Y-m-d H:i:s');
+    $stats[$key]['total']++;
     if ($status === 'success') {
-        $stats[$username]['success']++;
+        $stats[$key]['success']++;
     } else {
-        $stats[$username]['fail']++;
+        $stats[$key]['fail']++;
     }
     $record = ['time' => date('H:i:s'), 'api' => $apiType, 'status' => $status];
     if ($taskId !== '') $record['task'] = $taskId;
-    $stats[$username]['records'][] = $record;
-    if (count($stats[$username]['records']) > 200) {
-        $stats[$username]['records'] = array_slice($stats[$username]['records'], -200);
+    $stats[$key]['records'][] = $record;
+    if (count($stats[$key]['records']) > 200) {
+        $stats[$key]['records'] = array_slice($stats[$key]['records'], -200);
     }
 
     @file_put_contents($file, json_encode($stats, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), LOCK_EX);
@@ -411,13 +576,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['act'])) {
         jsonResp(saveUpdateConfig($UPDATE_FILE, $_GET));
     }
 
+    if ($act === 'api1_accounts') {
+        jsonResp(['ok' => true, 'data' => readApi1AllowedAccounts($API1_ACCOUNTS_FILE)]);
+    }
+
+    if ($act === 'save_api1_accounts') {
+        $raw = (string)($_GET['accounts'] ?? '');
+        $accounts = preg_split('/[\r\n,]+/', $raw) ?: [];
+        jsonResp(saveApi1AllowedAccounts($API1_ACCOUNTS_FILE, $accounts));
+    }
+
     if ($act === 'stats') {
         $date = trim((string)($_GET['date'] ?? date('Y-m-d')));
         $stats = readDayStats($STATS_DIR, $date);
         $summary = [];
-        foreach ($stats as $user => $info) {
+        foreach ($stats as $key => $info) {
             $summary[] = [
-                'username' => $user,
+                'key' => (string)$key,
+                'username' => $info['username'] ?? (string)$key,
+                'group_id' => $info['group_id'] ?? '',
+                'device_id' => $info['device_id'] ?? '',
+                'fingerprint_key' => $info['fingerprint_key'] ?? '',
+                'fingerprint_id' => $info['fingerprint_id'] ?? '',
+                'fingerprint_name' => $info['fingerprint_name'] ?? '',
+                'last_seen' => $info['last_seen'] ?? '',
                 'total' => $info['total'] ?? 0,
                 'success' => $info['success'] ?? 0,
                 'fail' => $info['fail'] ?? 0,
@@ -494,6 +676,35 @@ $input = json_decode($rawBody, true);
 if (!$input) jsonResp(['ok' => false, 'msg' => 'JSON解析失败']);
 
 $postAct = (string)($input['act'] ?? '');
+if ($postAct === 'api1_login') {
+    $username = trim((string)($input['username'] ?? ''));
+    $password = (string)($input['password'] ?? '');
+    if ($username === '' || $password === '') {
+        jsonResp(['code' => '400', 'data' => null, 'msg' => '账号或密码为空']);
+    }
+
+    $allowed = readApi1AllowedAccounts($API1_ACCOUNTS_FILE);
+    if (!in_array($username, $allowed, true)) {
+        appendLog($LOG_FILE, [
+            'time' => date('Y-m-d H:i:s'),
+            'api_type' => 1,
+            'ip' => $_SERVER['REMOTE_ADDR'] ?? '',
+            'username' => $username,
+            'status' => 'login_rejected',
+            'error' => '账号未在后台接口1白名单',
+        ], $MAX_LOGS);
+        jsonResp(['code' => '403', 'data' => null, 'msg' => '账号未授权，请联系管理员']);
+    }
+
+    $loginResult = api1LoginWithPassword($API1_AUTH['login_url'], $username, $password);
+    if (!empty($loginResult['error'])) {
+        jsonResp(['code' => '500', 'data' => null, 'msg' => '登录转发失败: ' . $loginResult['error']]);
+    }
+    header('Content-Type: application/json; charset=utf-8');
+    echo (string)$loginResult['response'];
+    exit;
+}
+
 if ($postAct === 'heartbeat') {
     jsonResp(updateDeviceHeartbeat($DEVICE_FILE, $input));
 }
@@ -513,12 +724,16 @@ if (empty($deviceCheck['allowed'])) {
         'username'   => $input['username'] ?? $input['用户名'] ?? '',
         'group_id'   => $input['group_id'] ?? $input['组ID'] ?? '',
         'device_id'  => $input['device_id'] ?? $input['设备ID'] ?? '',
+        'fingerprint_key' => $input['fingerprint_key'] ?? '',
+        'fingerprint_id' => $input['fingerprint_id'] ?? '',
+        'fingerprint_name' => $input['fingerprint_name'] ?? '',
         'device_key' => $deviceCheck['device_key'] ?? '',
         'encrypted_len' => strlen($encryptedData),
         'status'     => 'device_disabled',
         'error'      => $deviceCheck['msg'] ?? '设备已被禁用',
     ];
     appendLog($LOG_FILE, $logEntry, $MAX_LOGS);
+    recordStats($STATS_DIR, $input, $apiType, 'device_disabled');
     jsonResp(['ok' => false, 'msg' => $deviceCheck['msg'] ?? '设备已被禁用']);
 }
 
@@ -529,6 +744,9 @@ $logEntry = [
     'username'   => $input['username'] ?? $input['用户名'] ?? '',
     'group_id'   => $input['group_id'] ?? $input['组ID'] ?? '',
     'device_id'  => $input['device_id'] ?? $input['设备ID'] ?? '',
+    'fingerprint_key' => $input['fingerprint_key'] ?? '',
+    'fingerprint_id' => $input['fingerprint_id'] ?? '',
+    'fingerprint_name' => $input['fingerprint_name'] ?? '',
     'device_key' => $deviceCheck['device_key'] ?? '',
     'encrypted_len' => strlen($encryptedData),
 ];
@@ -591,6 +809,7 @@ if (is_array($decrypted)) {
 
 // 构建转发
 $target = $TARGETS[$apiType];
+$forwardHeaders = [];
 
 if ($apiType === 2) {
     $username = $input['用户名'] ?? '';
@@ -623,10 +842,38 @@ if ($apiType === 2) {
     if (!$taskUrl) jsonResp(['ok' => false, 'msg' => '接口1缺少url']);
 
     $logEntry['task_url'] = $taskUrl;
+    if (!is_string($responseBodyRaw) || $responseBodyRaw === '') {
+        $logEntry['status'] = 'extract_fail';
+        $logEntry['dump_id'] = saveDecryptDump($encryptedData, $plain, $apiType, $decrypted, $productResponse);
+        appendLog($LOG_FILE, $logEntry, $MAX_LOGS);
+        jsonResp(['ok' => false, 'msg' => '未提取到responseContent.response_body，接口1不会上传完整wrapper']);
+    }
 
     $payload = [
-        'appVersion' => 'vv2', 'url' => $taskUrl, 'result' => $plain,
+        'appVersion' => 'vv2', 'url' => $taskUrl, 'result' => $responseBodyRaw,
     ];
+    $api1InputToken = trim((string)($input['auth_token'] ?? $input['token'] ?? ''));
+    $api1UsingInputToken = $api1InputToken !== '';
+    if ($api1UsingInputToken) {
+        $forwardHeaders[] = 'Authorization: Bearer ' . $api1InputToken;
+        $logEntry['api1_token_source'] = 'app';
+        $api1InputTokenExp = jwtExp($api1InputToken);
+        $logEntry['api1_token_expires_at'] = $api1InputTokenExp > 0 ? date('Y-m-d H:i:s', $api1InputTokenExp) : '';
+    } else {
+        $tokenResult = getApi1Token($API1_AUTH, $API1_TOKEN_FILE);
+        if (empty($tokenResult['ok'])) {
+            $logEntry['status'] = 'api1_login_fail';
+            $logEntry['error'] = $tokenResult['msg'] ?? '接口1登录失败';
+            appendLog($LOG_FILE, $logEntry, $MAX_LOGS);
+            jsonResp(['ok' => false, 'msg' => $logEntry['error']]);
+        }
+        $forwardHeaders[] = 'Authorization: Bearer ' . $tokenResult['token'];
+        $logEntry['api1_token_source'] = 'proxy';
+        $logEntry['api1_token_cached'] = !empty($tokenResult['cached']);
+        $logEntry['api1_token_expires_at'] = date('Y-m-d H:i:s', (int)$tokenResult['expires_at']);
+    }
+    $logEntry['forward_result_from'] = 'responseContent.response_body';
+    $logEntry['forward_result_len'] = strlen($responseBodyRaw);
     $logEntry['dump_id'] = saveDecryptDump($encryptedData, $plain, $apiType, $decrypted, $productResponse, $payload);
 
     $forwardBody = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -634,8 +881,19 @@ if ($apiType === 2) {
 
 // 转发
 $logEntry['forward_url'] = $target['url'];
-$result = forwardToServer($target['url'], $forwardBody, $target['gzip']);
+$result = forwardToServer($target['url'], $forwardBody, $target['gzip'], $forwardHeaders);
 $serverResp = json_decode((string)$result['response'], true);
+
+if ($apiType === 1 && empty($api1UsingInputToken) && is_array($serverResp) && stripos((string)($serverResp['msg'] ?? ''), 'login') !== false) {
+    $tokenResult = getApi1Token($API1_AUTH, $API1_TOKEN_FILE, true);
+    if (!empty($tokenResult['ok'])) {
+        $forwardHeaders = ['Authorization: Bearer ' . $tokenResult['token']];
+        $result = forwardToServer($target['url'], $forwardBody, $target['gzip'], $forwardHeaders);
+        $serverResp = json_decode((string)$result['response'], true);
+        $logEntry['api1_token_refreshed'] = true;
+    }
+}
+
 $uploadDetail = [
     'time' => date('Y-m-d H:i:s'),
     'api_type' => $apiType,
@@ -655,8 +913,7 @@ if ($result['error']) {
     $logEntry['status'] = 'forward_fail';
     $logEntry['error']  = $result['error'];
     appendLog($LOG_FILE, $logEntry, $MAX_LOGS);
-    $statsUser = $logEntry['username'] ?? $input['username'] ?? $input['用户名'] ?? 'unknown';
-    recordStats($STATS_DIR, $statsUser, $apiType, 'forward_fail');
+    recordStats($STATS_DIR, $input, $apiType, 'forward_fail');
     jsonResp(['ok' => false, 'msg' => '转发失败: ' . $result['error']]);
 }
 
@@ -664,10 +921,9 @@ $logEntry['status']   = $serverResp['ok'] ?? false ? 'success' : 'task_server_er
 $logEntry['response'] = $serverResp ?? $result['response'];
 appendLog($LOG_FILE, $logEntry, $MAX_LOGS);
 
-$statsUser = $logEntry['username'] ?? $input['username'] ?? $input['用户名'] ?? 'unknown';
 $statsTaskId = '';
 if (is_array($taskInfo ?? null)) $statsTaskId = $taskInfo['ID'] ?? '';
-recordStats($STATS_DIR, $statsUser, $apiType, $logEntry['status'], $statsTaskId);
+recordStats($STATS_DIR, $input, $apiType, $logEntry['status'], $statsTaskId);
 
 if ($serverResp) {
     jsonResp($serverResp);
@@ -686,420 +942,406 @@ function renderPage(): void {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>任务代理控制台</title>
 <style>
-:root{--bg:#f4f6f8;--panel:#fff;--line:#e6eaf0;--text:#172033;--muted:#667085;--blue:#2563eb;--green:#16a34a;--red:#dc2626;--amber:#d97706;--cyan:#0891b2;--violet:#7c3aed}
+:root{--primary:#1890ff;--success:#52c41a;--danger:#f5222d;--warning:#faad14;--info:#722ed1;--sidebar:#001529;--sidebar-w:220px;--header-h:50px;--bg:#f0f2f5;--card:#fff;--border:#e8e8e8;--text:#333;--muted:#999;--font:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB",sans-serif}
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);padding:0}
-.shell{max-width:1280px;margin:0 auto;padding:22px}
-.top{background:#111827;color:#fff;padding:18px 22px;border-radius:8px;margin-bottom:16px;display:flex;justify-content:space-between;gap:18px;align-items:center}
-.top h1{font-size:20px;line-height:1.2;margin-bottom:6px}
-.top p{font-size:13px;color:#cbd5e1}
-.keybox{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.keybox input{height:36px;width:190px;border:1px solid #334155;border-radius:6px;background:#0f172a;color:#fff;padding:0 10px}
-.bar{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
-button{height:36px;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700;color:#fff;padding:0 14px}
-.btn-load{background:var(--blue)} .btn-clear{background:var(--red)} .btn-auto{background:var(--green)} .btn-dump{background:var(--violet)} .btn-devices{background:var(--cyan)} .btn-update{background:var(--amber)} .btn-secondary{background:#475569}
-.stats{display:grid;grid-template-columns:repeat(3,minmax(160px,1fr));gap:12px;margin-bottom:16px}
-.stat{background:var(--panel);padding:14px 16px;border-radius:8px;border:1px solid var(--line)}
-.stat b{font-size:26px;display:block;margin-top:4px}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;margin-bottom:16px;overflow:hidden}
-.panel-head{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:10px;align-items:center}
-.panel-head h2{font-size:16px}
-.panel-head p{font-size:12px;color:var(--muted);margin-top:3px}
-.panel-body{padding:16px}
-.grid{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:12px}
-.field label{display:block;font-size:12px;color:var(--muted);font-weight:700;margin-bottom:6px}
-.field input,.field textarea{width:100%;border:1px solid var(--line);border-radius:6px;padding:9px 10px;font-size:14px;background:#fff;color:var(--text)}
-.field textarea{min-height:86px;resize:vertical}
-.field small{display:block;color:var(--muted);font-size:12px;margin-top:5px}
-.check{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);padding-top:24px}
-.check input{width:16px;height:16px}
-.form-actions{display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap}
-.notice{background:#f8fafc;border:1px dashed #cbd5e1;color:#475569;border-radius:6px;padding:10px 12px;font-size:13px;margin-bottom:12px}
-.device-list{display:none;flex-direction:column;gap:8px}
-.log-list{display:flex;flex-direction:column;gap:8px}
-.log-item,.device-item{background:#fff;border-radius:8px;padding:14px;border:1px solid var(--line);border-left:4px solid #94a3b8}
-.log-item.success,.device-item{border-left-color:var(--green)}
-.device-item.disabled,.log-item.decrypt_fail,.log-item.json_fail{border-left-color:var(--red)}
-.log-item.forward_fail,.log-item.task_server_error,.log-item.device_disabled{border-left-color:var(--amber)}
-.log-meta,.device-meta{font-size:12px;color:var(--muted);margin-bottom:6px;display:flex;gap:12px;flex-wrap:wrap}
-.log-body{font-size:13px;color:#243044;line-height:1.8}
-.log-body code{background:#eef2f7;padding:2px 6px;border-radius:4px;font-size:12px}
-.log-actions,.device-actions{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}
-.log-actions a{display:inline-flex;align-items:center;justify-content:center;height:30px;padding:0 10px;border-radius:6px;background:var(--blue);color:#fff;text-decoration:none;font-size:12px;font-weight:700}
-.link-btn{display:inline-flex;height:36px;align-items:center;padding:0 12px;background:var(--blue);color:#fff;border-radius:6px;text-decoration:none;font-size:13px;font-weight:700}
-.tag{display:inline-block;padding:3px 8px;border-radius:999px;font-size:11px;color:#fff;font-weight:700}
-.tag-1{background:var(--blue)} .tag-2{background:var(--violet)}
-.tag-ok{background:var(--green)} .tag-fail{background:var(--red)} .tag-warn{background:var(--amber)}
-pre{background:#0f172a;color:#dbeafe;padding:12px;border-radius:6px;font-size:12px;overflow-x:auto;max-height:220px;margin-top:8px}
-.empty{text-align:center;padding:38px;color:var(--muted);font-size:15px}
-#autoLabel{font-size:13px;color:var(--muted)}
-.hidden{display:none}
-.btn-disable{background:var(--red)}.btn-enable{background:var(--green)}
-@media(max-width:760px){.shell{padding:12px}.top{display:block}.keybox{margin-top:12px}.stats,.grid{grid-template-columns:1fr}}
+body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14px}
+
+/* Login */
+.login-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%)}
+.login-box{background:#fff;border-radius:12px;padding:40px;width:380px;box-shadow:0 8px 40px rgba(0,0,0,.3)}
+.login-box h1{font-size:22px;text-align:center;margin-bottom:8px;color:#001529}
+.login-box p{text-align:center;color:var(--muted);margin-bottom:28px;font-size:13px}
+.login-box input{width:100%;height:42px;border:1px solid #d9d9d9;border-radius:6px;padding:0 14px;font-size:14px;margin-bottom:16px;transition:border .2s}
+.login-box input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 2px rgba(24,144,255,.1)}
+.login-box button{width:100%;height:42px;background:var(--primary);color:#fff;border:none;border-radius:6px;font-size:15px;font-weight:600;cursor:pointer;transition:opacity .2s}
+.login-box button:hover{opacity:.85}
+
+/* Layout */
+.layout{display:flex;min-height:100vh}
+.sidebar{width:var(--sidebar-w);background:var(--sidebar);position:fixed;top:0;left:0;bottom:0;z-index:100;overflow-y:auto;transition:width .2s}
+.sidebar-logo{height:50px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:700;border-bottom:1px solid rgba(255,255,255,.06)}
+.sidebar-menu{padding:8px 0}
+.menu-item{display:flex;align-items:center;height:44px;padding:0 20px;color:rgba(255,255,255,.7);cursor:pointer;font-size:14px;transition:all .15s;gap:10px;border-left:3px solid transparent}
+.menu-item:hover{color:#fff;background:rgba(255,255,255,.06)}
+.menu-item.active{color:#fff;background:rgba(24,144,255,.25);border-left-color:var(--primary)}
+.menu-icon{width:18px;text-align:center;font-style:normal}
+.main{margin-left:var(--sidebar-w);flex:1;min-width:0}
+.header{height:var(--header-h);background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 24px;position:sticky;top:0;z-index:50}
+.header-left{font-size:16px;font-weight:600}
+.header-right{display:flex;align-items:center;gap:16px;font-size:13px;color:var(--muted)}
+.header-right a{color:var(--danger);text-decoration:none;cursor:pointer;font-weight:600}
+.content{padding:20px 24px}
+
+/* Cards */
+.stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px}
+.stat-card{background:var(--card);border-radius:8px;padding:20px;border:1px solid var(--border)}
+.stat-card .label{font-size:13px;color:var(--muted);margin-bottom:8px}
+.stat-card .value{font-size:28px;font-weight:700}
+.stat-card .value.green{color:var(--success)}.stat-card .value.red{color:var(--danger)}.stat-card .value.blue{color:var(--primary)}.stat-card .value.purple{color:var(--info)}
+.card{background:var(--card);border-radius:8px;border:1px solid var(--border);margin-bottom:20px}
+.card-head{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.card-head h3{font-size:15px;font-weight:600}
+.card-body{padding:20px}
+.card-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
+/* Table */
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid #f0f0f0;font-size:13px}
+th{background:#fafafa;font-weight:600;color:#666;white-space:nowrap}
+tr:hover td{background:#fafafa}
+
+/* Buttons */
+.btn{height:32px;border:none;border-radius:4px;cursor:pointer;font-size:13px;font-weight:500;padding:0 14px;display:inline-flex;align-items:center;gap:4px;transition:opacity .2s;color:#fff}
+.btn:hover{opacity:.85}
+.btn-sm{height:26px;font-size:12px;padding:0 10px}
+.btn-primary{background:var(--primary)}.btn-success{background:var(--success)}.btn-danger{background:var(--danger)}.btn-warning{background:var(--warning);color:#333}.btn-info{background:var(--info)}.btn-default{background:#fff;color:var(--text);border:1px solid #d9d9d9}
+
+/* Tags */
+.tag{display:inline-block;padding:2px 8px;border-radius:3px;font-size:12px;font-weight:500;line-height:20px}
+.tag-success{background:#f6ffed;color:#52c41a;border:1px solid #b7eb8f}.tag-danger{background:#fff2f0;color:#f5222d;border:1px solid #ffccc7}.tag-warning{background:#fffbe6;color:#faad14;border:1px solid #ffe58f}.tag-info{background:#f9f0ff;color:#722ed1;border:1px solid #d3adf7}.tag-blue{background:#e6f7ff;color:#1890ff;border:1px solid #91d5ff}
+
+/* Form */
+.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+.form-item{display:flex;flex-direction:column;gap:6px}
+.form-item label{font-size:13px;color:#666;font-weight:500}
+.form-item input,.form-item textarea,.form-item select{height:36px;border:1px solid #d9d9d9;border-radius:4px;padding:0 10px;font-size:14px}
+.form-item textarea{height:auto;min-height:80px;padding:8px 10px;resize:vertical}
+.form-check{display:flex;align-items:center;gap:8px;padding-top:20px}
+
+/* Log items */
+.log-entry{padding:12px 16px;border-bottom:1px solid #f5f5f5;font-size:13px}
+.log-entry:last-child{border-bottom:none}
+.log-entry:hover{background:#fafafa}
+.log-meta{display:flex;gap:10px;align-items:center;margin-bottom:4px;flex-wrap:wrap}
+.log-detail{color:#666;line-height:1.8}
+.log-detail code{background:#f5f5f5;padding:1px 6px;border-radius:3px;font-size:12px}
+.log-actions{margin-top:6px;display:flex;gap:6px}
+.log-actions a{font-size:12px;color:var(--primary);text-decoration:none}
+.log-actions a:hover{text-decoration:underline}
+pre.resp{background:#f5f5f5;padding:10px;border-radius:4px;font-size:12px;overflow-x:auto;max-height:160px;margin-top:6px;color:#333}
+
+/* Device */
+.device-card{padding:14px 16px;border:1px solid var(--border);border-radius:6px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px}
+.device-info{flex:1;min-width:200px}
+.device-info b{font-size:15px}
+.device-meta{font-size:12px;color:var(--muted);margin-top:4px;display:flex;gap:12px;flex-wrap:wrap}
+
+/* Stats user row */
+.stats-user{padding:14px 16px;border:1px solid var(--border);border-radius:6px;margin-bottom:10px}
+.stats-user-head{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+.stats-nums{display:flex;gap:20px;font-size:14px}
+.stats-records{margin-top:8px;font-size:12px;color:var(--muted)}
+
+.empty{text-align:center;padding:40px;color:var(--muted)}
+.hidden{display:none !important}
+@media(max-width:768px){.sidebar{width:0;overflow:hidden}.main{margin-left:0}.stat-row{grid-template-columns:repeat(2,1fr)}.form-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
-<div class="shell">
-<div class="top">
-    <div>
-        <h1>任务代理控制台</h1>
-        <p>日志监控、设备下线、APK在线发布统一管理</p>
-    </div>
-    <div class="keybox">
-        <input type="password" id="key" placeholder="查看密码" value="">
+
+<!-- Login Page -->
+<div class="login-wrap" id="loginPage">
+<div class="login-box">
+    <h1>任务代理控制台</h1>
+    <p>日志监控 / 设备管理 / 数据统计</p>
+    <input type="password" id="loginPwd" placeholder="请输入管理密码" onkeydown="if(event.key==='Enter')doLogin()">
+    <button onclick="doLogin()">登 录</button>
+</div>
+</div>
+
+<!-- Admin Layout -->
+<div class="layout hidden" id="adminLayout">
+<div class="sidebar">
+    <div class="sidebar-logo">任务代理控制台</div>
+    <div class="sidebar-menu">
+        <div class="menu-item active" onclick="switchPage('dashboard',this)"><i class="menu-icon">&#9632;</i>仪表盘</div>
+        <div class="menu-item" onclick="switchPage('logs',this)"><i class="menu-icon">&#9776;</i>转发日志</div>
+        <div class="menu-item" onclick="switchPage('devices',this)"><i class="menu-icon">&#9679;</i>在线设备</div>
+        <div class="menu-item" onclick="switchPage('stats',this)"><i class="menu-icon">&#9733;</i>环境统计</div>
+        <div class="menu-item" onclick="switchPage('accounts',this)"><i class="menu-icon">&#9737;</i>接口1账号</div>
+        <div class="menu-item" onclick="switchPage('update',this)"><i class="menu-icon">&#8679;</i>更新发布</div>
+        <div class="menu-item" onclick="switchPage('data',this)"><i class="menu-icon">&#128196;</i>解密数据</div>
     </div>
 </div>
-<div class="bar">
-    <button class="btn-load" onclick="loadLogs()">加载日志</button>
-    <button class="btn-dump" onclick="openLatestDump()">最新解密数据</button>
-    <button class="btn-dump" onclick="openDumpList()">解密数据列表</button>
-    <button class="btn-devices" onclick="loadDevices()">设备控制</button>
-    <button class="btn-update" onclick="openUpdateConfig()">更新配置</button>
-    <button class="btn-secondary" onclick="loadStats()">环境统计</button>
-    <button class="btn-auto" onclick="toggleAuto()" id="autoBtn">自动刷新</button>
-    <button class="btn-clear" onclick="clearLogs()">清空日志</button>
-    <span id="autoLabel"></span>
+<div class="main">
+    <div class="header">
+        <div class="header-left" id="pageTitle">仪表盘</div>
+        <div class="header-right">
+            <span id="headerTime"></span>
+            <a onclick="doLogout()">退出登录</a>
+        </div>
+    </div>
+    <div class="content">
+
+    <!-- Dashboard -->
+    <div class="page" id="page-dashboard">
+        <div class="stat-row" id="dashStats"></div>
+        <div class="card"><div class="card-head"><h3>最近转发</h3><div class="card-toolbar"><button class="btn btn-primary btn-sm" onclick="switchPage('logs',document.querySelectorAll('.menu-item')[1])">查看全部</button></div></div><div class="card-body"><div id="dashLogs" style="max-height:400px;overflow-y:auto"><div class="empty">加载中...</div></div></div></div>
+    </div>
+
+    <!-- Logs -->
+    <div class="page hidden" id="page-logs">
+        <div class="card"><div class="card-head"><h3>转发日志</h3><div class="card-toolbar"><button class="btn btn-primary btn-sm" onclick="loadLogs()">刷新</button><button class="btn btn-success btn-sm" onclick="toggleAutoLog()" id="autoLogBtn">自动刷新</button><button class="btn btn-danger btn-sm" onclick="clearLogs()">清空</button></div></div><div class="card-body" style="padding:0"><div id="logList"><div class="empty">点击刷新加载日志</div></div></div></div>
+    </div>
+
+    <!-- Devices -->
+    <div class="page hidden" id="page-devices">
+        <div class="card"><div class="card-head"><h3>在线设备 <span id="onlineCount" style="color:var(--success);font-size:14px"></span></h3><div class="card-toolbar"><span style="font-size:12px;color:var(--muted)">每10秒自动刷新，仅显示最近2分钟有心跳的设备</span></div></div><div class="card-body"><div id="deviceList"><div class="empty">加载中...</div></div></div></div>
+    </div>
+
+    <!-- Stats -->
+    <div class="page hidden" id="page-stats">
+        <div class="card"><div class="card-head"><h3>环境统计</h3><div class="card-toolbar"><select id="statsDate" onchange="loadStats()" style="height:32px;border:1px solid #d9d9d9;border-radius:4px;padding:0 10px;font-size:13px"></select></div></div><div class="card-body"><div id="statsBody"><div class="empty">加载中...</div></div></div></div>
+    </div>
+
+    <!-- Accounts -->
+    <div class="page hidden" id="page-accounts">
+        <div class="card"><div class="card-head"><h3>接口1允许账号</h3></div><div class="card-body"><div class="form-item"><label>每行一个用户名，未设置的账号登录接口1会被拒绝</label><textarea id="api1Accounts" style="min-height:220px;font-family:monospace"></textarea></div><div style="margin-top:14px;display:flex;gap:10px;align-items:center"><button class="btn btn-primary" onclick="saveApi1Accounts()">保存账号</button><span id="api1AccountsResult" style="font-size:13px;color:var(--muted)"></span></div></div></div>
+    </div>
+
+    <!-- Update -->
+    <div class="page hidden" id="page-update">
+        <div class="card"><div class="card-head"><h3>在线更新发布</h3></div><div class="card-body"><div id="updateBody"><div class="empty">加载中...</div></div></div></div>
+    </div>
+
+    <!-- Data -->
+    <div class="page hidden" id="page-data">
+        <div class="card"><div class="card-head"><h3>解密数据列表</h3><div class="card-toolbar"><button class="btn btn-info btn-sm" onclick="openLatestDump()">打开最新</button></div></div><div class="card-body"><div id="dumpList"><div class="empty">加载中...</div></div></div></div>
+    </div>
+
+    </div>
 </div>
-<div class="stats" id="stats"></div>
-<div class="panel hidden" id="updatePanel"></div>
-<div class="panel hidden" id="statsPanel"><div class="panel-head"><div><h2>环境统计</h2><p>每日用户使用次数和明细</p></div><div style="display:flex;gap:8px;align-items:center"><select id="statsDate" onchange="loadStats()" style="height:36px;border:1px solid var(--line);border-radius:6px;padding:0 8px;font-size:13px"></select><button class="btn-secondary" onclick="document.getElementById('statsPanel').classList.add('hidden')">收起</button></div></div><div class="panel-body"><div id="statsBody"><div class="empty">加载中...</div></div></div></div>
-<div class="panel hidden" id="devicePanel"><div class="panel-head"><div><h2>在线设备 <span id="onlineCount" style="font-size:14px;color:var(--green)"></span></h2><p>仅显示最近2分钟有心跳的设备，每10秒自动刷新</p></div><div style="display:flex;gap:8px"><button class="btn-secondary" onclick="stopDeviceRefresh();document.getElementById('devicePanel').classList.add('hidden')">收起</button></div></div><div class="panel-body"><div class="device-list" id="deviceList"></div></div></div>
-<div class="panel"><div class="panel-head"><div><h2>转发日志</h2><p>查看解密、上传和任务服务器响应</p></div></div><div class="panel-body"><div class="log-list" id="logList"><div class="empty">输入密码后点击加载</div></div></div></div>
 </div>
 
 <script>
-let autoTimer = null;
 const BASE = location.pathname;
+const AUTH_KEY = '';
+let KEY = localStorage.getItem('admin_key') || '';
+let autoLogTimer = null, deviceTimer = null;
 
-function getKey() { return document.getElementById('key').value; }
+function doLogin() {
+    const pwd = document.getElementById('loginPwd').value.trim();
+    if (!pwd) return alert('请输入密码');
+    KEY = pwd;
+    localStorage.setItem('admin_key', pwd);
+    fetch(BASE+'?act=logs&limit=1&key='+encodeURIComponent(pwd)).then(r=>r.json()).then(d=>{
+        if (d.ok === false && d.msg === '密码错误') { alert('密码错误'); KEY=''; localStorage.removeItem('admin_key'); return; }
+        showAdmin();
+    }).catch(()=>alert('网络错误'));
+}
+function doLogout() { KEY=''; localStorage.removeItem('admin_key'); location.reload(); }
+function showAdmin() {
+    document.getElementById('loginPage').classList.add('hidden');
+    document.getElementById('adminLayout').classList.remove('hidden');
+    loadDashboard();
+    setInterval(()=>{ document.getElementById('headerTime').textContent = new Date().toLocaleTimeString(); }, 1000);
+}
 
+if (KEY) { fetch(BASE+'?act=logs&limit=1&key='+encodeURIComponent(KEY)).then(r=>r.json()).then(d=>{ if(d.ok!==false||d.msg!=='密码错误') showAdmin(); else { KEY=''; localStorage.removeItem('admin_key'); }}).catch(()=>{}); }
+
+const pageTitles = {dashboard:'仪表盘',logs:'转发日志',devices:'在线设备',stats:'环境统计',accounts:'接口1账号',update:'更新发布',data:'解密数据'};
+let currentPage = 'dashboard';
+function switchPage(name, el) {
+    if (deviceTimer && name !== 'devices') { clearInterval(deviceTimer); deviceTimer = null; }
+    currentPage = name;
+    document.querySelectorAll('.page').forEach(p=>p.classList.add('hidden'));
+    document.getElementById('page-'+name).classList.remove('hidden');
+    document.querySelectorAll('.menu-item').forEach(m=>m.classList.remove('active'));
+    if (el) el.classList.add('active');
+    document.getElementById('pageTitle').textContent = pageTitles[name]||name;
+    if (name==='dashboard') loadDashboard();
+    else if (name==='logs') loadLogs();
+    else if (name==='devices') { loadDevices(); if(!deviceTimer) deviceTimer=setInterval(loadDevices,10000); }
+    else if (name==='stats') loadStats();
+    else if (name==='accounts') loadApi1Accounts();
+    else if (name==='update') loadUpdateConfig();
+    else if (name==='data') loadDumpList();
+}
+
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function escAttr(s){return esc(s).replace(/"/g,'&quot;');}
+
+// ===== Dashboard =====
+async function loadDashboard() {
+    try {
+        const [logsR, devR, statsR] = await Promise.all([
+            fetch(BASE+'?act=logs&limit=50&key='+encodeURIComponent(KEY)).then(r=>r.json()),
+            fetch(BASE+'?act=devices&key='+encodeURIComponent(KEY)).then(r=>r.json()),
+            fetch(BASE+'?act=stats&key='+encodeURIComponent(KEY)).then(r=>r.json())
+        ]);
+        const logs = logsR.data||[];
+        const online = devR.online_count||0;
+        const users = statsR.data||[];
+        const todayTotal = users.reduce((s,u)=>s+u.total,0);
+        const todayOk = users.reduce((s,u)=>s+u.success,0);
+        const ok = logs.filter(l=>l.status==='success').length;
+        document.getElementById('dashStats').innerHTML = `
+            <div class="stat-card"><div class="label">在线设备</div><div class="value blue">${online}</div></div>
+            <div class="stat-card"><div class="label">今日请求</div><div class="value">${todayTotal}</div></div>
+            <div class="stat-card"><div class="label">今日成功</div><div class="value green">${todayOk}</div></div>
+            <div class="stat-card"><div class="label">Active FP</div><div class="value purple">${users.length}</div></div>`;
+        renderLogEntries(logs.slice(0,10), 'dashLogs');
+    } catch(e) { console.error(e); }
+}
+
+// ===== Logs =====
 async function loadLogs() {
-    const key = getKey();
-    if (!key) return alert('请输入密码');
-    try {
-        const r = await fetch(BASE + '?act=logs&limit=100&key=' + encodeURIComponent(key));
-        const d = await r.json();
-        if (!d.ok) return alert(d.msg || '加载失败');
-        renderLogs(d.data || []);
-    } catch (e) { alert('请求失败: ' + e.message); }
-}
-
-function renderLogs(logs) {
-    const el = document.getElementById('logList');
-    if (!logs.length) { el.innerHTML = '<div class="empty">暂无日志</div>'; renderStats([]); return; }
-
-    renderStats(logs);
-    el.innerHTML = logs.map(l => {
-        const cls = l.status || '';
-        const apiTag = `<span class="tag tag-${l.api_type}">接口${l.api_type}</span>`;
-        let statusTag = '';
-        if (cls === 'success') statusTag = '<span class="tag tag-ok">成功</span>';
-        else if (cls === 'decrypt_fail' || cls === 'json_fail') statusTag = '<span class="tag tag-fail">' + cls + '</span>';
-        else if (cls) statusTag = '<span class="tag tag-warn">' + cls + '</span>';
-
-        let body = '';
-        if (l.username) body += `<b>用户:</b> <code>${l.username}</code> `;
-        if (l.group_id) body += `<b>组:</b> <code>${l.group_id}</code> `;
-        if (l.task_info) body += `<b>任务:</b> <code>${l.task_info.ID || JSON.stringify(l.task_info)}</code> `;
-        if (l.task_url) body += `<b>URL:</b> <code>${l.task_url.substring(0, 60)}...</code> `;
-        if (l.encrypted_len) body += `<b>加密:</b> <code>${(l.encrypted_len/1024).toFixed(1)}KB</code> `;
-        if (l.decrypted_len) body += `<b>解密:</b> <code>${(l.decrypted_len/1024).toFixed(1)}KB</code> `;
-        if (l.extract_from) body += `<b>提取:</b> <code>${escHtml(String(l.extract_from))}</code> `;
-        if (l.forward_data_type) body += `<b>data类型:</b> <code>${escHtml(String(l.forward_data_type))}</code> `;
-
-        let resp = '';
-        if (l.response) {
-            const rs = typeof l.response === 'string' ? l.response : JSON.stringify(l.response, null, 2);
-            resp = `<pre>${escHtml(rs.substring(0, 500))}</pre>`;
-        }
-        if (l.error) resp += `<pre style="color:#ff6b6b">${escHtml(l.error)}</pre>`;
-        const dumpHref = l.dump_id ? `${BASE}?act=dump&id=${encodeURIComponent(l.dump_id)}&key=${encodeURIComponent(getKey())}` : '';
-        const uploadHref = l.upload_id ? `${BASE}?act=upload&id=${encodeURIComponent(l.upload_id)}&key=${encodeURIComponent(getKey())}` : '';
-        const actions = `<div class="log-actions">${
-            dumpHref
-                ? `<a href="${dumpHref}" target="_blank" rel="noopener">查看解密数据</a>`
-                : `<a href="javascript:void(0)" onclick="alert('这条旧日志没有保存解密数据，请重新跑一次任务后再点查看。')">查看解密数据</a>`
-        } ${
-            uploadHref
-                ? `<a href="${uploadHref}" target="_blank" rel="noopener">查看上传详情</a>`
-                : `<a href="javascript:void(0)" onclick="alert('这条旧日志没有保存上传详情，请重新跑一次任务后再点查看。')">查看上传详情</a>`
-        }</div>`;
-
-        return `<div class="log-item ${cls}">
-            <div class="log-meta">${apiTag} ${statusTag} <span>${l.time}</span> <span>IP: ${l.ip || '-'}</span></div>
-            <div class="log-body">${body}</div>
-            ${actions}
-            ${resp}
-        </div>`;
-    }).join('');
-}
-
-function renderStats(logs) {
-    const total = logs.length;
-    const ok = logs.filter(l => l.status === 'success').length;
-    const fail = total - ok;
-    document.getElementById('stats').innerHTML = `
-        <div class="stat">总请求<b>${total}</b></div>
-        <div class="stat" style="color:#52c41a">成功<b>${ok}</b></div>
-        <div class="stat" style="color:#ff4d4f">失败<b>${fail}</b></div>
-    `;
-}
-
-function escHtml(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function escHtmlAttr(s) { return escHtml(s).replace(/"/g,'&quot;'); }
-
-let deviceTimer = null;
-
-async function loadDevices() {
-    const key = getKey();
-    if (!key) return alert('请输入密码');
-    try {
-        const r = await fetch(BASE + '?act=devices&key=' + encodeURIComponent(key));
-        const d = await r.json();
-        if (!d.ok) return alert(d.msg || '加载设备失败');
-        document.getElementById('devicePanel').classList.remove('hidden');
-        document.getElementById('onlineCount').textContent = '(' + (d.online_count || 0) + '台在线)';
-        renderDevices(d.data || []);
-        if (!deviceTimer) deviceTimer = setInterval(loadDevices, 10000);
-    } catch (e) { alert('请求失败: ' + e.message); }
-}
-
-function stopDeviceRefresh() {
-    if (deviceTimer) { clearInterval(deviceTimer); deviceTimer = null; }
-}
-
-function renderDevices(devices) {
-    const el = document.getElementById('deviceList');
-    el.style.display = 'flex';
-    if (!devices.length) {
-        el.innerHTML = '<div class="empty">当前没有在线设备</div>';
-        return;
-    }
-    el.innerHTML = devices.map(d => {
-        const disabled = !!d.disabled;
-        const status = disabled ? '<span class="tag tag-fail">已禁用</span>' : '<span class="tag tag-ok">允许使用</span>';
-        const btn = disabled
-            ? `<button class="btn-enable" onclick="toggleDevice('${escAttr(d.key)}', 0)">启用设备</button>`
-            : `<button class="btn-disable" onclick="toggleDevice('${escAttr(d.key)}', 1)">禁用设备</button>`;
-        return `<div class="device-item ${disabled ? 'disabled' : ''}">
-            <div><b>${escHtml(d.username || '-')}</b> ${status}</div>
-            <div class="device-meta">
-                <span>组ID: ${escHtml(d.group_id || '-')}</span>
-                <span>接口: ${escHtml(String(d.api_type || '-'))}</span>
-                <span>设备ID: ${escHtml(d.device_id || '-')}</span>
-                <span>IP: ${escHtml(d.ip || '-')}</span>
-                <span>首次: ${escHtml(d.first_seen || '-')}</span>
-                <span>最后心跳: ${escHtml(d.last_seen || '-')}</span>
-            </div>
-            ${d.disabled_reason ? `<pre>${escHtml(d.disabled_reason)}</pre>` : ''}
-            <div class="device-actions">${btn}</div>
-        </div>`;
-    }).join('');
-}
-
-async function toggleDevice(deviceKey, disabled) {
-    const key = getKey();
-    if (!key) return alert('请输入密码');
-    let reason = '';
-    if (disabled) {
-        reason = prompt('禁用原因，App会显示这段提示', '账号已被下线，禁止使用') || '';
-        if (!reason) return;
-    }
-    const url = BASE + '?act=device_toggle'
-        + '&key=' + encodeURIComponent(key)
-        + '&device_key=' + encodeURIComponent(deviceKey)
-        + '&disabled=' + encodeURIComponent(String(disabled))
-        + '&reason=' + encodeURIComponent(reason);
-    const r = await fetch(url);
+    const r = await fetch(BASE+'?act=logs&limit=100&key='+encodeURIComponent(KEY));
     const d = await r.json();
-    alert(d.msg || (d.ok ? '操作成功' : '操作失败'));
+    if (!d.ok) return;
+    renderLogEntries(d.data||[], 'logList');
+}
+function renderLogEntries(logs, target) {
+    const el = document.getElementById(target);
+    if (!logs.length) { el.innerHTML='<div class="empty">暂无日志</div>'; return; }
+    el.innerHTML = logs.map(l => {
+        const st = l.status||'';
+        const apiTag = `<span class="tag tag-${l.api_type===1?'blue':'info'}">接口${l.api_type}</span>`;
+        let stTag = '';
+        if(st==='success') stTag='<span class="tag tag-success">成功</span>';
+        else if(st==='decrypt_fail'||st==='json_fail') stTag=`<span class="tag tag-danger">${st}</span>`;
+        else if(st) stTag=`<span class="tag tag-warning">${st}</span>`;
+        let body='';
+        if(l.username) body+=`<b>用户:</b><code>${esc(l.username)}</code> `;
+        if(l.group_id) body+=`<b>组:</b><code>${esc(l.group_id)}</code> `;
+        if(l.task_info) body+=`<b>任务:</b><code>${esc(l.task_info.ID||JSON.stringify(l.task_info))}</code> `;
+        if(l.encrypted_len) body+=`<b>加密:</b><code>${(l.encrypted_len/1024).toFixed(1)}KB</code> `;
+        if(l.decrypted_len) body+=`<b>解密:</b><code>${(l.decrypted_len/1024).toFixed(1)}KB</code> `;
+        if(l.extract_from) body+=`<b>提取:</b><code>${esc(l.extract_from)}</code> `;
+        let resp='';
+        if(l.response){ const rs=typeof l.response==='string'?l.response:JSON.stringify(l.response,null,2); resp=`<pre class="resp">${esc(rs.substring(0,500))}</pre>`; }
+        if(l.error) resp+=`<pre class="resp" style="color:var(--danger)">${esc(l.error)}</pre>`;
+        const dH=l.dump_id?`<a href="${BASE}?act=dump&id=${encodeURIComponent(l.dump_id)}&key=${encodeURIComponent(KEY)}" target="_blank">解密数据</a>`:'';
+        const uH=l.upload_id?`<a href="${BASE}?act=upload&id=${encodeURIComponent(l.upload_id)}&key=${encodeURIComponent(KEY)}" target="_blank">上传详情</a>`:'';
+        return `<div class="log-entry"><div class="log-meta">${apiTag} ${stTag} <span style="color:var(--muted);font-size:12px">${l.time||''} &nbsp; IP:${l.ip||'-'}</span></div><div class="log-detail">${body}</div>${(dH||uH)?`<div class="log-actions">${dH} ${uH}</div>`:''} ${resp}</div>`;
+    }).join('');
+}
+function toggleAutoLog() {
+    const btn=document.getElementById('autoLogBtn');
+    if(autoLogTimer){clearInterval(autoLogTimer);autoLogTimer=null;btn.textContent='自动刷新';btn.className='btn btn-success btn-sm';}
+    else{loadLogs();autoLogTimer=setInterval(loadLogs,5000);btn.textContent='停止刷新';btn.className='btn btn-default btn-sm';}
+}
+async function clearLogs(){
+    if(!confirm('确定清空所有日志和数据?'))return;
+    await fetch(BASE+'?act=clear&key='+encodeURIComponent(KEY));
+    alert('已清空');loadLogs();
+}
+
+// ===== Devices =====
+async function loadDevices() {
+    const r = await fetch(BASE+'?act=devices&key='+encodeURIComponent(KEY));
+    const d = await r.json();
+    if(!d.ok) return;
+    document.getElementById('onlineCount').textContent='('+d.online_count+'台在线)';
+    const el=document.getElementById('deviceList');
+    const devs=d.data||[];
+    if(!devs.length){el.innerHTML='<div class="empty">当前没有在线设备</div>';return;}
+    el.innerHTML=devs.map(dv=>{
+        const dis=!!dv.disabled;
+        const stTag=dis?'<span class="tag tag-danger">已禁用</span>':'<span class="tag tag-success">在线</span>';
+        const btn=dis
+            ?`<button class="btn btn-success btn-sm" onclick="toggleDevice('${esc(dv.key)}',0)">启用</button>`
+            :`<button class="btn btn-danger btn-sm" onclick="toggleDevice('${esc(dv.key)}',1)">禁用</button>`;
+        return `<div class="device-card"><div class="device-info"><b>${esc(dv.username||'-')}</b> ${stTag}<div class="device-meta"><span>组:${esc(dv.group_id||'-')}</span><span>接口:${dv.api_type||'-'}</span><span>设备:${esc((dv.device_id||'').substring(0,12))}</span><span>指纹:${esc(dv.fingerprint_name||((dv.fingerprint_id||dv.fingerprint_key||'').substring(0,12))||'-')}</span><span>IP:${esc(dv.ip||'-')}</span><span>心跳:${esc(dv.last_seen||'-')}</span></div>${dv.disabled_reason?`<div style="margin-top:4px;font-size:12px;color:var(--danger)">${esc(dv.disabled_reason)}</div>`:''}</div><div>${btn}</div></div>`;
+    }).join('');
+}
+async function toggleDevice(dk,dis){
+    let reason='';
+    if(dis){reason=prompt('禁用原因（App会显示）','账号已被下线，禁止使用');if(!reason)return;}
+    await fetch(BASE+'?act=device_toggle&key='+encodeURIComponent(KEY)+'&device_key='+encodeURIComponent(dk)+'&disabled='+dis+'&reason='+encodeURIComponent(reason));
     loadDevices();
 }
 
-function escAttr(s) { return String(s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
-
-async function openUpdateConfig() {
-    const key = getKey();
-    if (!key) return alert('请输入密码');
-    const r = await fetch(BASE + '?act=update_config&key=' + encodeURIComponent(key));
-    const d = await r.json();
-    if (!d.ok) return alert(d.msg || '读取更新配置失败');
-    renderUpdatePanel(d.data || {});
-}
-
-function renderUpdatePanel(c) {
-    const panel = document.getElementById('updatePanel');
-    panel.classList.remove('hidden');
-    panel.innerHTML = `
-        <div class="panel-head">
-            <div>
-                <h2>在线更新发布</h2>
-                <p>上传APK后会自动生成下载地址；App当前versionCode是1，后台版本号填2或更高才会弹窗</p>
-            </div>
-            <button class="btn-secondary" onclick="document.getElementById('updatePanel').classList.add('hidden')">收起</button>
-        </div>
-        <div class="panel-body">
-            <div class="notice">版本控制规则：App请求时会带当前versionCode；只有后台versionCode大于App当前versionCode，并且已上传APK，App才会提示下载更新。</div>
-            <form id="updateForm" onsubmit="submitUpdateForm(event)">
-                <div class="grid">
-                    <div class="field">
-                        <label>versionCode</label>
-                        <input name="version_code" type="number" min="1" value="${escHtmlAttr(String(c.version_code || 1))}">
-                        <small>每次发布新包必须递增，例如当前App是1，新包填2。</small>
-                    </div>
-                    <div class="field">
-                        <label>versionName</label>
-                        <input name="version_name" value="${escHtmlAttr(c.version_name || '1.0.0')}">
-                    </div>
-                    <div class="field">
-                        <label>APK文件</label>
-                        <input name="apk" type="file" accept=".apk,application/vnd.android.package-archive">
-                        <small>选择APK上传后自动生成下载地址。</small>
-                    </div>
-                    <div class="field">
-                        <label>当前下载地址</label>
-                        <input name="apk_url" value="${escHtmlAttr(c.apk_url || '')}" placeholder="也可以手动填外部APK地址">
-                    </div>
-                    <div class="field">
-                        <label>弹窗标题</label>
-                        <input name="title" value="${escHtmlAttr(c.title || '发现新版本')}">
-                    </div>
-                    <label class="check"><input name="force" type="checkbox" ${c.force ? 'checked' : ''}> 强制更新</label>
-                    <div class="field" style="grid-column:1/-1">
-                        <label>更新说明</label>
-                        <textarea name="message" placeholder="给用户看的更新内容">${escHtml(c.message || '')}</textarea>
-                    </div>
-                </div>
-                <div class="form-actions">
-                    <button class="btn-update" type="submit">保存并发布</button>
-                    ${c.apk_url ? `<a class="link-btn" href="${escHtmlAttr(c.apk_url)}" target="_blank" rel="noopener">测试下载</a>` : ''}
-                    <span id="updateResult" style="font-size:13px;color:var(--muted)">${c.updated_at ? '上次更新: ' + escHtml(c.updated_at) : ''}</span>
-                </div>
-            </form>
-        </div>`;
-}
-
-async function submitUpdateForm(event) {
-    event.preventDefault();
-    const key = getKey();
-    if (!key) return alert('请输入密码');
-    const form = document.getElementById('updateForm');
-    const fd = new FormData(form);
-    fd.append('act', 'upload_update');
-    fd.append('key', key);
-    const resultEl = document.getElementById('updateResult');
-    resultEl.textContent = '正在上传保存...';
-    try {
-        const r = await fetch(BASE, { method: 'POST', body: fd });
-        const d = await r.json();
-        resultEl.textContent = d.msg || (d.ok ? '保存成功' : '保存失败');
-        if (d.ok) renderUpdatePanel(d.data || {});
-    } catch (e) {
-        resultEl.textContent = '请求失败: ' + e.message;
-    }
-}
-
-async function getDumpList() {
-    const key = getKey();
-    if (!key) { alert('请输入密码'); return []; }
-    const r = await fetch(BASE + '?act=dumps&key=' + encodeURIComponent(key));
-    const d = await r.json();
-    if (!d.ok) { alert(d.msg || '加载解密数据失败'); return []; }
-    return d.data || [];
-}
-
-async function openLatestDump() {
-    const dumps = await getDumpList();
-    if (!dumps.length) return alert('暂无解密数据。旧日志没有保存 dump，请重新跑一次任务。');
-    window.open(BASE + '?act=dump&id=' + encodeURIComponent(dumps[0].id) + '&key=' + encodeURIComponent(getKey()), '_blank');
-}
-
-async function openDumpList() {
-    const dumps = await getDumpList();
-    if (!dumps.length) return alert('暂无解密数据。旧日志没有保存 dump，请重新跑一次任务。');
-    const text = dumps.map((d, i) => `${i + 1}. ${d.time}  ${d.id}  ${(d.size / 1024).toFixed(1)}KB`).join('\n');
-    const pick = prompt('输入序号打开解密数据：\n\n' + text, '1');
-    const idx = parseInt(pick || '', 10) - 1;
-    if (!Number.isInteger(idx) || idx < 0 || idx >= dumps.length) return;
-    window.open(BASE + '?act=dump&id=' + encodeURIComponent(dumps[idx].id) + '&key=' + encodeURIComponent(getKey()), '_blank');
-}
-
-async function clearLogs() {
-    if (!confirm('确定清空所有日志?')) return;
-    const r = await fetch(BASE + '?act=clear&key=' + encodeURIComponent(getKey()));
-    const d = await r.json();
-    alert(d.msg || '已清空');
-    loadLogs();
-}
-
-async function loadStats() {
-    const key = getKey();
-    if (!key) return alert('请输入密码');
-    const sel = document.getElementById('statsDate');
-    const date = sel.value || '';
-    try {
-        const r = await fetch(BASE + '?act=stats&key=' + encodeURIComponent(key) + (date ? '&date=' + encodeURIComponent(date) : ''));
-        const d = await r.json();
-        if (!d.ok) return alert(d.msg || '加载统计失败');
-        document.getElementById('statsPanel').classList.remove('hidden');
-        if (d.dates && d.dates.length) {
-            const curVal = sel.value || d.date;
-            sel.innerHTML = d.dates.map(dt => `<option value="${dt}" ${dt===curVal?'selected':''}>${dt}</option>`).join('');
-        }
-        renderStats2(d.data || [], d.date);
-    } catch (e) { alert('请求失败: ' + e.message); }
-}
-
-function renderStats2(users, date) {
-    const el = document.getElementById('statsBody');
-    if (!users.length) { el.innerHTML = '<div class="empty">当天暂无数据</div>'; return; }
-    const totalAll = users.reduce((s,u) => s+u.total, 0);
-    const okAll = users.reduce((s,u) => s+u.success, 0);
-    const failAll = users.reduce((s,u) => s+u.fail, 0);
-    let html = `<div class="stats" style="margin-bottom:16px">
-        <div class="stat">日期<b>${escHtml(date)}</b></div>
-        <div class="stat">总用户<b>${users.length}</b></div>
-        <div class="stat">总请求<b>${totalAll}</b></div>
-    </div>`;
-    html += users.map(u => {
-        const rate = u.total > 0 ? ((u.success/u.total)*100).toFixed(1) : '0';
-        const last5 = (u.records || []).slice(-5).reverse();
-        const detail = last5.map(r =>
-            `<span style="font-size:12px;color:var(--muted)">${r.time}</span> ` +
-            `<span class="tag ${r.status==='success'?'tag-ok':'tag-warn'}">${r.status}</span>`
-        ).join(' &nbsp; ');
-        return `<div class="log-item ${u.fail>0?'task_server_error':'success'}" style="border-left-width:4px">
-            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-                <div><b style="font-size:16px">${escHtml(u.username)}</b></div>
-                <div style="display:flex;gap:16px;font-size:14px">
-                    <span>总计 <b>${u.total}</b></span>
-                    <span style="color:var(--green)">成功 <b>${u.success}</b></span>
-                    <span style="color:var(--red)">失败 <b>${u.fail}</b></span>
-                    <span style="color:var(--blue)">成功率 <b>${rate}%</b></span>
-                </div>
-            </div>
-            ${detail ? `<div style="margin-top:8px">最近: ${detail}</div>` : ''}
-        </div>`;
+// ===== Stats =====
+async function loadStats(){
+    const sel=document.getElementById('statsDate');
+    const date=sel.value||'';
+    const r=await fetch(BASE+'?act=stats&key='+encodeURIComponent(KEY)+(date?'&date='+encodeURIComponent(date):''));
+    const d=await r.json();
+    if(!d.ok)return;
+    if(d.dates&&d.dates.length){const cv=sel.value||d.date;sel.innerHTML=d.dates.map(dt=>`<option value="${dt}" ${dt===cv?'selected':''}>${dt}</option>`).join('');}
+    const el=document.getElementById('statsBody');
+    const fps=d.data||[];
+    if(!fps.length){el.innerHTML='<div class="empty">No fingerprint call records today</div>';return;}
+    const tAll=fps.reduce((s,u)=>s+u.total,0);
+    let html=`<div class="stat-row" style="margin-bottom:16px"><div class="stat-card"><div class="label">Date</div><div class="value" style="font-size:18px">${esc(d.date)}</div></div><div class="stat-card"><div class="label">Active FP</div><div class="value blue">${fps.length}</div></div><div class="stat-card"><div class="label">Calls</div><div class="value">${tAll}</div></div><div class="stat-card"><div class="label">Success</div><div class="value green">${fps.reduce((s,u)=>s+u.success,0)}</div></div></div>`;
+    html+=fps.map(u=>{
+        const rate=u.total>0?((u.success/u.total)*100).toFixed(1):'0';
+        const last5=(u.records||[]).slice(-8).reverse().map(r=>`<span class="tag ${r.status==='success'?'tag-success':'tag-warning'}" style="margin-right:4px">${r.time} API${r.api} ${r.status}${r.task?' '+esc(r.task):''}</span>`).join('');
+        const fpTitle=u.fingerprint_name||u.fingerprint_id||u.fingerprint_key||u.device_id||'unknown';
+        const fpMeta=`user:${esc(u.username||'-')} group:${esc(u.group_id||'-')} device:${esc((u.device_id||'-').substring(0,16))} fp:${esc((u.fingerprint_id||u.fingerprint_key||'-').substring(0,16))} last:${esc(u.last_seen||'-')}`;
+        return `<div class="stats-user"><div class="stats-user-head"><div><b style="font-size:15px">${esc(fpTitle)}</b><div class="stats-records">${fpMeta}</div></div><div class="stats-nums"><span>Calls <b>${u.total}</b></span><span style="color:var(--success)">OK <b>${u.success}</b></span><span style="color:var(--danger)">Fail <b>${u.fail}</b></span><span style="color:var(--primary)">Rate <b>${rate}%</b></span></div></div>${last5?`<div class="stats-records">${last5}</div>`:''}</div>`;
     }).join('');
-    el.innerHTML = html;
+    el.innerHTML=html;
 }
 
-function toggleAuto() {
-    const btn = document.getElementById('autoBtn');
-    const label = document.getElementById('autoLabel');
-    if (autoTimer) {
-        clearInterval(autoTimer);
-        autoTimer = null;
-        btn.textContent = '自动刷新';
-        btn.style.background = '#52c41a';
-        label.textContent = '';
-    } else {
-        loadLogs();
-        autoTimer = setInterval(loadLogs, 5000);
-        btn.textContent = '停止刷新';
-        btn.style.background = '#666';
-        label.textContent = '每5秒刷新';
-    }
+// ===== API1 Accounts =====
+async function loadApi1Accounts(){
+    const r=await fetch(BASE+'?act=api1_accounts&key='+encodeURIComponent(KEY));
+    const d=await r.json();
+    if(!d.ok)return;
+    document.getElementById('api1Accounts').value=(d.data||[]).join('\n');
+    document.getElementById('api1AccountsResult').textContent='已加载 '+(d.data||[]).length+' 个账号';
+}
+async function saveApi1Accounts(){
+    const accounts=document.getElementById('api1Accounts').value;
+    document.getElementById('api1AccountsResult').textContent='保存中...';
+    const r=await fetch(BASE+'?act=save_api1_accounts&key='+encodeURIComponent(KEY)+'&accounts='+encodeURIComponent(accounts));
+    const d=await r.json();
+    document.getElementById('api1AccountsResult').textContent=d.ok?'已保存 '+(d.count||0)+' 个账号':(d.msg||'保存失败');
+}
+
+// ===== Update =====
+async function loadUpdateConfig(){
+    const r=await fetch(BASE+'?act=update_config&key='+encodeURIComponent(KEY));
+    const d=await r.json();
+    if(!d.ok)return;
+    const c=d.data||{};
+    document.getElementById('updateBody').innerHTML=`
+        <div style="background:#fffbe6;border:1px dashed #ffe58f;padding:10px 14px;border-radius:4px;margin-bottom:16px;font-size:13px;color:#666">App请求时带versionCode，后台版本号大于App才会弹窗更新。</div>
+        <form id="updateForm" onsubmit="submitUpdate(event)">
+        <div class="form-grid">
+            <div class="form-item"><label>versionCode</label><input name="version_code" type="number" min="1" value="${escAttr(String(c.version_code||1))}"></div>
+            <div class="form-item"><label>versionName</label><input name="version_name" value="${escAttr(c.version_name||'1.0.0')}"></div>
+            <div class="form-item"><label>APK文件</label><input name="apk" type="file" accept=".apk"></div>
+            <div class="form-item"><label>下载地址</label><input name="apk_url" value="${escAttr(c.apk_url||'')}" placeholder="上传APK后自动生成"></div>
+            <div class="form-item"><label>弹窗标题</label><input name="title" value="${escAttr(c.title||'发现新版本')}"></div>
+            <div class="form-check"><input name="force" type="checkbox" ${c.force?'checked':''}><label>强制更新</label></div>
+            <div class="form-item" style="grid-column:1/-1"><label>更新说明</label><textarea name="message" placeholder="给用户看的更新内容">${esc(c.message||'')}</textarea></div>
+        </div>
+        <div style="margin-top:16px;display:flex;gap:10px;align-items:center">
+            <button class="btn btn-primary" type="submit">保存并发布</button>
+            ${c.apk_url?`<a href="${escAttr(c.apk_url)}" target="_blank" class="btn btn-default">测试下载</a>`:''}
+            <span id="updateResult" style="font-size:13px;color:var(--muted)">${c.updated_at?'上次: '+esc(c.updated_at):''}</span>
+        </div></form>`;
+}
+async function submitUpdate(e){
+    e.preventDefault();
+    const fd=new FormData(document.getElementById('updateForm'));
+    fd.append('act','upload_update');fd.append('key',KEY);
+    document.getElementById('updateResult').textContent='保存中...';
+    const r=await fetch(BASE,{method:'POST',body:fd});
+    const d=await r.json();
+    document.getElementById('updateResult').textContent=d.msg||(d.ok?'已保存':'失败');
+    if(d.ok) loadUpdateConfig();
+}
+
+// ===== Data =====
+async function loadDumpList(){
+    const r=await fetch(BASE+'?act=dumps&key='+encodeURIComponent(KEY));
+    const d=await r.json();
+    if(!d.ok)return;
+    const el=document.getElementById('dumpList');
+    const files=d.data||[];
+    if(!files.length){el.innerHTML='<div class="empty">暂无解密数据</div>';return;}
+    el.innerHTML=`<table><thead><tr><th>#</th><th>时间</th><th>ID</th><th>大小</th><th>操作</th></tr></thead><tbody>${files.map((f,i)=>`<tr><td>${i+1}</td><td>${esc(f.time)}</td><td style="font-size:12px;font-family:monospace">${esc(f.id)}</td><td>${(f.size/1024).toFixed(1)}KB</td><td><a href="${BASE}?act=dump&id=${encodeURIComponent(f.id)}&key=${encodeURIComponent(KEY)}" target="_blank" style="color:var(--primary)">查看</a></td></tr>`).join('')}</tbody></table>`;
+}
+async function openLatestDump(){
+    const r=await fetch(BASE+'?act=dumps&key='+encodeURIComponent(KEY));
+    const d=await r.json();
+    const files=d.data||[];
+    if(!files.length) return alert('暂无数据');
+    window.open(BASE+'?act=dump&id='+encodeURIComponent(files[0].id)+'&key='+encodeURIComponent(KEY),'_blank');
 }
 </script>
 </body>

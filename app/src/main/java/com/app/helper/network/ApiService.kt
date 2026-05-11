@@ -1,5 +1,8 @@
 package com.app.helper.network
 
+import com.app.helper.App
+import com.app.helper.util.FingerprintManager
+import com.app.helper.util.TokenManager
 import com.google.gson.Gson
 import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
@@ -13,6 +16,7 @@ import java.io.ByteArrayOutputStream
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPOutputStream
+import org.json.JSONObject
 
 object ApiService {
 
@@ -28,7 +32,7 @@ object ApiService {
 
     // ===== 接口一 =====
     suspend fun login(username: String, password: String): ApiResponse<LoginData> {
-        return post(ApiConfig.LOGIN_PATH, mapOf("username" to username, "password" to password))
+        return proxyPost(mapOf("act" to "api1_login", "username" to username, "password" to password))
     }
 
     suspend fun takeTask(): ApiResponse<TaskData> {
@@ -61,6 +65,7 @@ object ApiService {
         body["group_id"] = groupId
         body["api_type"] = apiType
         body["device_id"] = deviceId
+        addFingerprintFields(body)
 
         val jsonBody = gson.toJson(body)
             .toRequestBody("application/json; charset=utf-8".toMediaType())
@@ -89,6 +94,8 @@ object ApiService {
         body["username"] = username
         body["group_id"] = groupId
         body["device_id"] = deviceId
+        body["auth_token"] = TokenManager.getToken()
+        addFingerprintFields(body)
 
         val jsonBody = gson.toJson(body)
             .toRequestBody("application/json; charset=utf-8".toMediaType())
@@ -132,6 +139,7 @@ object ApiService {
         body["username"] = username
         body["group_id"] = groupId
         body["device_id"] = deviceId
+        addFingerprintFields(body)
         body["用户名"] = username
         body["组ID"] = groupId
         body["设备ID"] = deviceId
@@ -157,6 +165,32 @@ object ApiService {
         return bos.toByteArray()
     }
 
+    private fun addFingerprintFields(body: MutableMap<String, Any>) {
+        try {
+            val context = App.context
+            val activeName = FingerprintManager.getActiveFpName(context).orEmpty()
+            val raw = FingerprintManager.loadCurrentFp(context)
+            var fpName = activeName
+            var fpId = ""
+
+            if (!raw.isNullOrEmpty()) {
+                val json = JSONObject(raw)
+                fpId = json.optString("androidId", "")
+                if (fpName.isBlank()) fpName = json.optString("name", "")
+            }
+
+            if (fpName.isNotBlank()) body["fingerprint_name"] = fpName
+            if (fpId.isNotBlank()) body["fingerprint_id"] = fpId
+            body["fingerprint_key"] = when {
+                fpId.isNotBlank() -> fpId
+                fpName.isNotBlank() -> fpName
+                else -> body["device_id"]?.toString().orEmpty()
+            }
+        } catch (e: Exception) {
+            // Fingerprint stats should never block task submission.
+        }
+    }
+
     // ===== 接口一通用方法 =====
     private suspend inline fun <reified T> get(path: String): ApiResponse<T> = withContext(Dispatchers.IO) {
         val request = Request.Builder()
@@ -180,6 +214,21 @@ object ApiService {
             .build()
 
         val response = HttpClient.client.newCall(request).execute()
+        val json = response.body?.string() ?: throw Exception("Empty response")
+        val type = TypeToken.getParameterized(ApiResponse::class.java, T::class.java).type
+        gson.fromJson(json, type)
+    }
+
+    private suspend inline fun <reified T> proxyPost(body: Any): ApiResponse<T> = withContext(Dispatchers.IO) {
+        val jsonBody = gson.toJson(body)
+            .toRequestBody("application/json; charset=utf-8".toMediaType())
+
+        val request = Request.Builder()
+            .url(ApiConfig.DECRYPT_PROXY_URL)
+            .post(jsonBody)
+            .build()
+
+        val response = api2Client.newCall(request).execute()
         val json = response.body?.string() ?: throw Exception("Empty response")
         val type = TypeToken.getParameterized(ApiResponse::class.java, T::class.java).type
         gson.fromJson(json, type)
