@@ -22,14 +22,14 @@ $API2_ACCOUNTS_FILE = __DIR__ . '/api2_allowed_accounts.json';
 $MAX_LOGS = 500;
 
 $API1_AUTH = [
-    'login_url' => 'https://eqwofaygdsjko.uk:443/api/user/login',
+    'login_url' => 'https://zb1.eqwofaygdsjko.uk:443/api/user/login',
     'username'  => 'youngdenise',
     'password'  => '@dzaM3mT9I',
 ];
 
 $TARGETS = [
     1 => [
-        'url'  => 'https://eqwofaygdsjko.uk:443/api/task/submit/v2',
+        'url'  => 'https://zb1.eqwofaygdsjko.uk:443/api/task/submit/v2',
         'gzip' => false,
     ],
     2 => [
