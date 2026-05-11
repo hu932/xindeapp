@@ -399,7 +399,7 @@ class TaskService : android.app.Service() {
                 encryptedData = encryptedData,
                 username = TokenManager.getUsername(),
                 groupId = TokenManager.getGroupId(),
-                deviceId = getDeviceId()
+                deviceId = getAppDeviceId()
             )
             if (response.ok) {
                 uploadCount++
@@ -431,7 +431,7 @@ class TaskService : android.app.Service() {
                 groupId = TokenManager.getGroupId(),
                 taskInfo = taskInfo,
                 encryptedData = encryptedData,
-                deviceId = getDeviceId()
+                deviceId = getAppDeviceId()
             )
 
             if (response.ok) {
@@ -476,7 +476,7 @@ class TaskService : android.app.Service() {
                 username = TokenManager.getUsername(),
                 groupId = TokenManager.getGroupId(),
                 apiType = TokenManager.getApiType(),
-                deviceId = getDeviceId()
+                deviceId = getAppDeviceId()
             )
             if (!response.ok || !response.allowed) {
                 deviceAllowed = false
@@ -498,7 +498,7 @@ class TaskService : android.app.Service() {
         updateFloatStatus(deviceBlockedMsg)
     }
 
-    private fun getDeviceId(): String {
+    private fun getAppDeviceId(): String {
         val androidId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
         return androidId?.takeIf { it.isNotBlank() } ?: "android-${Build.MODEL}"
     }
