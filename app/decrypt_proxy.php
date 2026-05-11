@@ -717,6 +717,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['act'])) {
         jsonResp(updateDeviceControl($DEVICE_FILE, $deviceKey, $disabled, $reason));
     }
 
+    if ($act === 'device_toggle_user') {
+        $username = trim((string)($_GET['username'] ?? ''));
+        $disabled = (int)($_GET['disabled'] ?? 0) === 1;
+        $reason = trim((string)($_GET['reason'] ?? ''));
+        if ($username === '') jsonResp(['ok' => false, 'msg' => '缺少用户名']);
+        $devices = readDeviceControls($DEVICE_FILE);
+        $count = 0;
+        foreach ($devices as $key => &$dev) {
+            if (($dev['username'] ?? '') === $username) {
+                $dev['disabled'] = $disabled;
+                $dev['disabled_reason'] = $disabled ? $reason : '';
+                $dev['updated_at'] = date('Y-m-d H:i:s');
+                $count++;
+            }
+        }
+        unset($dev);
+        saveDeviceControls($DEVICE_FILE, $devices);
+        jsonResp(['ok' => true, 'msg' => ($disabled ? '已禁用' : '已启用') . " {$username} 的 {$count} 个设备"]);
+    }
+
     if ($act === 'update_config') {
         jsonResp(['ok' => true, 'data' => readUpdateConfig($UPDATE_FILE)]);
     }
@@ -1493,19 +1513,64 @@ async function loadDevices() {
     const el=document.getElementById('deviceList');
     const devs=d.data||[];
     if(!devs.length){el.innerHTML='<div class="empty">当前没有在线设备</div>';return;}
-    el.innerHTML=devs.map(dv=>{
-        const dis=!!dv.disabled;
-        const stTag=dis?'<span class="tag tag-danger">已禁用</span>':'<span class="tag tag-success">在线</span>';
-        const btn=dis
-            ?`<button class="btn btn-success btn-sm" onclick="toggleDevice('${esc(dv.key)}',0)">启用</button>`
-            :`<button class="btn btn-danger btn-sm" onclick="toggleDevice('${esc(dv.key)}',1)">禁用</button>`;
-        return `<div class="device-card"><div class="device-info"><b>${esc(dv.username||'-')}</b> ${stTag}${dv.account_remark?`<div style="margin-top:4px;font-size:12px;color:var(--danger);font-weight:600">${esc(dv.account_remark)}</div>`:''}<div class="device-meta"><span>组:${esc(dv.group_id||'-')}</span><span>接口:${dv.api_type||'-'}</span><span>设备:${esc((dv.device_id||'').substring(0,12))}</span><span>指纹:${esc(dv.fingerprint_name||((dv.fingerprint_id||dv.fingerprint_key||'').substring(0,12))||'-')}</span><span>IP:${esc(dv.ip||'-')}</span><span>心跳:${esc(dv.last_seen||'-')}</span></div>${dv.disabled_reason?`<div style="margin-top:4px;font-size:12px;color:var(--danger)">${esc(dv.disabled_reason)}</div>`:''}</div><div>${btn}</div></div>`;
+
+    // 按账号分组
+    const byUser={};
+    for(const dv of devs){
+        const u=dv.username||'unknown';
+        if(!byUser[u]) byUser[u]={username:u,account_remark:dv.account_remark||'',devices:[],api_type:dv.api_type||0};
+        byUser[u].devices.push(dv);
+        if(dv.account_remark) byUser[u].account_remark=dv.account_remark;
+    }
+    const users=Object.values(byUser).sort((a,b)=>b.devices.length-a.devices.length);
+
+    el.innerHTML=users.map(u=>{
+        const remark=u.account_remark?`<span style="color:var(--danger);font-weight:600;font-size:12px;margin-left:8px">${esc(u.account_remark)}</span>`:'';
+        const allDisabled=u.devices.every(d=>d.disabled);
+        const someDisabled=u.devices.some(d=>d.disabled);
+        const userTag=allDisabled?'<span class="tag tag-danger">全部禁用</span>':someDisabled?'<span class="tag tag-warning">部分禁用</span>':'<span class="tag tag-success">在线</span>';
+        const batchBtn=allDisabled
+            ?`<button class="btn btn-success btn-sm" onclick="toggleUserDevices('${escAttr(u.username)}',0)">全部启用</button>`
+            :`<button class="btn btn-danger btn-sm" onclick="toggleUserDevices('${escAttr(u.username)}',1)">全部禁用</button>`;
+
+        const devRows=u.devices.map(dv=>{
+            const dis=!!dv.disabled;
+            const st=dis?'<span class="tag tag-danger" style="font-size:11px">禁用</span>':'<span class="tag tag-success" style="font-size:11px">在线</span>';
+            const singleBtn=dis
+                ?`<button class="btn btn-success btn-sm" onclick="toggleDevice('${esc(dv.key)}',0)">启用</button>`
+                :`<button class="btn btn-danger btn-sm" onclick="toggleDevice('${esc(dv.key)}',1)">禁用</button>`;
+            return `<tr>
+                <td>${st}</td>
+                <td>${esc(dv.fingerprint_name||((dv.fingerprint_id||dv.fingerprint_key||'').substring(0,14))||'-')}</td>
+                <td style="font-size:12px">${esc((dv.device_id||'-').substring(0,14))}</td>
+                <td style="font-size:12px">${esc(dv.ip||'-')}</td>
+                <td style="font-size:12px;color:var(--muted)">${esc((dv.last_seen||'').substring(11)||'-')}</td>
+                <td>${singleBtn}</td>
+            </tr>`;
+        }).join('');
+
+        return `<div class="stats-user">
+            <div class="stats-user-head">
+                <div>
+                    <b style="font-size:15px">${esc(u.username)}</b> ${userTag}${remark}
+                    <div class="stats-records">接口:${u.api_type||'-'} 设备数:${u.devices.length} 组:${esc(u.devices[0]?.group_id||'-')}</div>
+                </div>
+                <div style="display:flex;gap:6px">${batchBtn}</div>
+            </div>
+            <table style="margin-top:10px"><thead><tr><th style="width:60px">状态</th><th>指纹</th><th>设备ID</th><th>IP</th><th style="width:70px">心跳</th><th style="width:60px">操作</th></tr></thead><tbody>${devRows}</tbody></table>
+        </div>`;
     }).join('');
 }
 async function toggleDevice(dk,dis){
     let reason='';
     if(dis){reason=prompt('禁用原因（App会显示）','账号已被下线，禁止使用');if(!reason)return;}
     await fetch(BASE+'?act=device_toggle&key='+encodeURIComponent(KEY)+'&device_key='+encodeURIComponent(dk)+'&disabled='+dis+'&reason='+encodeURIComponent(reason));
+    loadDevices();
+}
+async function toggleUserDevices(username,dis){
+    let reason='';
+    if(dis){reason=prompt('禁用 '+username+' 所有设备的原因','账号已被下线，禁止使用');if(!reason)return;}
+    await fetch(BASE+'?act=device_toggle_user&key='+encodeURIComponent(KEY)+'&username='+encodeURIComponent(username)+'&disabled='+dis+'&reason='+encodeURIComponent(reason));
     loadDevices();
 }
 
