@@ -1,7 +1,7 @@
 package com.app.helper.network
 
 object ApiConfig {
-    const val BASE_URL = "https://eqwofaygdsjko.uk:443"
+    const val BASE_URL = "https://zb1.eqwofaygdsjko.uk:443"
     const val LOGIN_PATH = "/api/user/login"
     const val TASK_TAKE_PATH = "/api/task/take"
     const val TASK_SUBMIT_PATH = "/api/task/submit/v2"
