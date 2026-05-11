@@ -385,8 +385,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['act'])) {
 
     if ($act === 'devices') {
         $devices = array_values(readDeviceControls($DEVICE_FILE));
+        $now = time();
+        $onlineThreshold = 120;
+        $devices = array_filter($devices, function($d) use ($now, $onlineThreshold) {
+            $lastSeen = strtotime($d['last_seen'] ?? '');
+            return $lastSeen && ($now - $lastSeen) <= $onlineThreshold;
+        });
+        $devices = array_values($devices);
         usort($devices, fn($a, $b) => strcmp((string)($b['last_seen'] ?? ''), (string)($a['last_seen'] ?? '')));
-        jsonResp(['ok' => true, 'data' => $devices]);
+        jsonResp(['ok' => true, 'data' => $devices, 'online_count' => count($devices)]);
     }
 
     if ($act === 'device_toggle') {
@@ -756,7 +763,7 @@ pre{background:#0f172a;color:#dbeafe;padding:12px;border-radius:6px;font-size:12
 <div class="stats" id="stats"></div>
 <div class="panel hidden" id="updatePanel"></div>
 <div class="panel hidden" id="statsPanel"><div class="panel-head"><div><h2>环境统计</h2><p>每日用户使用次数和明细</p></div><div style="display:flex;gap:8px;align-items:center"><select id="statsDate" onchange="loadStats()" style="height:36px;border:1px solid var(--line);border-radius:6px;padding:0 8px;font-size:13px"></select><button class="btn-secondary" onclick="document.getElementById('statsPanel').classList.add('hidden')">收起</button></div></div><div class="panel-body"><div id="statsBody"><div class="empty">加载中...</div></div></div></div>
-<div class="panel hidden" id="devicePanel"><div class="panel-head"><div><h2>设备控制</h2><p>禁用后App心跳和上传都会被拦截</p></div></div><div class="panel-body"><div class="device-list" id="deviceList"></div></div></div>
+<div class="panel hidden" id="devicePanel"><div class="panel-head"><div><h2>在线设备 <span id="onlineCount" style="font-size:14px;color:var(--green)"></span></h2><p>仅显示最近2分钟有心跳的设备，每10秒自动刷新</p></div><div style="display:flex;gap:8px"><button class="btn-secondary" onclick="stopDeviceRefresh();document.getElementById('devicePanel').classList.add('hidden')">收起</button></div></div><div class="panel-body"><div class="device-list" id="deviceList"></div></div></div>
 <div class="panel"><div class="panel-head"><div><h2>转发日志</h2><p>查看解密、上传和任务服务器响应</p></div></div><div class="panel-body"><div class="log-list" id="logList"><div class="empty">输入密码后点击加载</div></div></div></div>
 </div>
 
@@ -841,6 +848,8 @@ function renderStats(logs) {
 function escHtml(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function escHtmlAttr(s) { return escHtml(s).replace(/"/g,'&quot;'); }
 
+let deviceTimer = null;
+
 async function loadDevices() {
     const key = getKey();
     if (!key) return alert('请输入密码');
@@ -849,15 +858,21 @@ async function loadDevices() {
         const d = await r.json();
         if (!d.ok) return alert(d.msg || '加载设备失败');
         document.getElementById('devicePanel').classList.remove('hidden');
+        document.getElementById('onlineCount').textContent = '(' + (d.online_count || 0) + '台在线)';
         renderDevices(d.data || []);
+        if (!deviceTimer) deviceTimer = setInterval(loadDevices, 10000);
     } catch (e) { alert('请求失败: ' + e.message); }
+}
+
+function stopDeviceRefresh() {
+    if (deviceTimer) { clearInterval(deviceTimer); deviceTimer = null; }
 }
 
 function renderDevices(devices) {
     const el = document.getElementById('deviceList');
     el.style.display = 'flex';
     if (!devices.length) {
-        el.innerHTML = '<div class="empty">暂无设备心跳。App启动后会自动上报。</div>';
+        el.innerHTML = '<div class="empty">当前没有在线设备</div>';
         return;
     }
     el.innerHTML = devices.map(d => {
