@@ -513,11 +513,14 @@ function fingerprintInfoFromInput(array $input): array {
 }
 
 function recordStats(string $dir, array $input, int $apiType, string $status, string $taskId = ''): void {
+    global $API1_ACCOUNTS_FILE, $API2_ACCOUNTS_FILE;
     $date = date('Y-m-d');
     $file = getStatsFile($dir, $date);
     $stats = readDayStats($dir, $date);
     $fp = fingerprintInfoFromInput($input);
     $key = $fp['key'];
+    $remarkMap = accountRemarkMap(readApi1AllowedAccounts($apiType === 2 ? $API2_ACCOUNTS_FILE : $API1_ACCOUNTS_FILE));
+    $accountRemark = $remarkMap[$fp['username']] ?? '';
 
     if (!isset($stats[$key])) {
         $stats[$key] = [
@@ -525,6 +528,7 @@ function recordStats(string $dir, array $input, int $apiType, string $status, st
             'fingerprint_id' => $fp['fingerprint_id'],
             'fingerprint_name' => $fp['fingerprint_name'],
             'username' => $fp['username'],
+            'account_remark' => $accountRemark,
             'group_id' => $fp['group_id'],
             'device_id' => $fp['device_id'],
             'total' => 0,
@@ -537,6 +541,7 @@ function recordStats(string $dir, array $input, int $apiType, string $status, st
     $stats[$key]['fingerprint_id'] = $fp['fingerprint_id'];
     $stats[$key]['fingerprint_name'] = $fp['fingerprint_name'];
     $stats[$key]['username'] = $fp['username'];
+    if ($accountRemark !== '') $stats[$key]['account_remark'] = $accountRemark;
     $stats[$key]['group_id'] = $fp['group_id'];
     $stats[$key]['device_id'] = $fp['device_id'];
     $stats[$key]['last_seen'] = date('Y-m-d H:i:s');
@@ -644,11 +649,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['act'])) {
     if ($act === 'stats') {
         $date = trim((string)($_GET['date'] ?? date('Y-m-d')));
         $stats = readDayStats($STATS_DIR, $date);
+        $api1Remarks = accountRemarkMap(readApi1AllowedAccounts($API1_ACCOUNTS_FILE));
+        $api2Remarks = accountRemarkMap(readApi1AllowedAccounts($API2_ACCOUNTS_FILE));
         $summary = [];
         foreach ($stats as $key => $info) {
+            $username = (string)($info['username'] ?? (string)$key);
+            $accountRemark = (string)($info['account_remark'] ?? '');
+            if ($accountRemark === '') $accountRemark = $api1Remarks[$username] ?? ($api2Remarks[$username] ?? '');
             $summary[] = [
                 'key' => (string)$key,
-                'username' => $info['username'] ?? (string)$key,
+                'username' => $username,
+                'account_remark' => $accountRemark,
                 'group_id' => $info['group_id'] ?? '',
                 'device_id' => $info['device_id'] ?? '',
                 'fingerprint_key' => $info['fingerprint_key'] ?? '',
@@ -663,6 +674,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['act'])) {
         }
         usort($summary, fn($a, $b) => $b['total'] - $a['total']);
         jsonResp(['ok' => true, 'date' => $date, 'dates' => getStatsDateList($STATS_DIR), 'data' => $summary]);
+    }
+
+    if ($act === 'clear_stats') {
+        $date = trim((string)($_GET['date'] ?? date('Y-m-d')));
+        $file = getStatsFile($STATS_DIR, $date);
+        if (is_file($file)) @unlink($file);
+        jsonResp(['ok' => true, 'msg' => '统计已清除', 'date' => $date]);
     }
 
     if ($act === 'clear') {
@@ -1146,7 +1164,7 @@ pre.resp{background:#f5f5f5;padding:10px;border-radius:4px;font-size:12px;overfl
 
     <!-- Stats -->
     <div class="page hidden" id="page-stats">
-        <div class="card"><div class="card-head"><h3>环境统计</h3><div class="card-toolbar"><select id="statsDate" onchange="loadStats()" style="height:32px;border:1px solid #d9d9d9;border-radius:4px;padding:0 10px;font-size:13px"></select></div></div><div class="card-body"><div id="statsBody"><div class="empty">加载中...</div></div></div></div>
+        <div class="card"><div class="card-head"><h3>指纹环境管理</h3><div class="card-toolbar"><select id="statsDate" onchange="loadStats()" style="height:32px;border:1px solid #d9d9d9;border-radius:4px;padding:0 10px;font-size:13px"></select><button class="btn btn-danger btn-sm" onclick="clearStats()">清除统计</button></div></div><div class="card-body"><div id="statsBody"><div class="empty">加载中...</div></div></div></div>
     </div>
 
     <!-- Accounts -->
@@ -1194,7 +1212,7 @@ function showAdmin() {
 
 if (KEY) { fetch(BASE+'?act=logs&limit=1&key='+encodeURIComponent(KEY)).then(r=>r.json()).then(d=>{ if(d.ok!==false||d.msg!=='密码错误') showAdmin(); else { KEY=''; localStorage.removeItem('admin_key'); }}).catch(()=>{}); }
 
-const pageTitles = {dashboard:'仪表盘',logs:'转发日志',devices:'在线设备',stats:'环境统计',accounts:'接口账号备注',update:'更新发布',data:'解密数据'};
+const pageTitles = {dashboard:'仪表盘',logs:'转发日志',devices:'在线设备',stats:'指纹环境管理',accounts:'接口账号备注',update:'更新发布',data:'解密数据'};
 let currentPage = 'dashboard';
 function switchPage(name, el) {
     if (deviceTimer && name !== 'devices') { clearInterval(deviceTimer); deviceTimer = null; }
@@ -1234,7 +1252,7 @@ async function loadDashboard() {
             <div class="stat-card"><div class="label">在线设备</div><div class="value blue">${online}</div></div>
             <div class="stat-card"><div class="label">今日请求</div><div class="value">${todayTotal}</div></div>
             <div class="stat-card"><div class="label">今日成功</div><div class="value green">${todayOk}</div></div>
-            <div class="stat-card"><div class="label">Active FP</div><div class="value purple">${users.length}</div></div>`;
+            <div class="stat-card"><div class="label">活跃指纹</div><div class="value purple">${users.length}</div></div>`;
         renderLogEntries(logs.slice(0,10), 'dashLogs');
     } catch(e) { console.error(e); }
 }
@@ -1317,17 +1335,28 @@ async function loadStats(){
     if(d.dates&&d.dates.length){const cv=sel.value||d.date;sel.innerHTML=d.dates.map(dt=>`<option value="${dt}" ${dt===cv?'selected':''}>${dt}</option>`).join('');}
     const el=document.getElementById('statsBody');
     const fps=d.data||[];
-    if(!fps.length){el.innerHTML='<div class="empty">No fingerprint call records today</div>';return;}
+    if(!fps.length){el.innerHTML='<div class="empty">当天暂无指纹调用记录</div>';return;}
     const tAll=fps.reduce((s,u)=>s+u.total,0);
-    let html=`<div class="stat-row" style="margin-bottom:16px"><div class="stat-card"><div class="label">Date</div><div class="value" style="font-size:18px">${esc(d.date)}</div></div><div class="stat-card"><div class="label">Active FP</div><div class="value blue">${fps.length}</div></div><div class="stat-card"><div class="label">Calls</div><div class="value">${tAll}</div></div><div class="stat-card"><div class="label">Success</div><div class="value green">${fps.reduce((s,u)=>s+u.success,0)}</div></div></div>`;
+    let html=`<div class="stat-row" style="margin-bottom:16px"><div class="stat-card"><div class="label">日期</div><div class="value" style="font-size:18px">${esc(d.date)}</div></div><div class="stat-card"><div class="label">活跃指纹</div><div class="value blue">${fps.length}</div></div><div class="stat-card"><div class="label">总调用</div><div class="value">${tAll}</div></div><div class="stat-card"><div class="label">成功调用</div><div class="value green">${fps.reduce((s,u)=>s+u.success,0)}</div></div></div>`;
     html+=fps.map(u=>{
         const rate=u.total>0?((u.success/u.total)*100).toFixed(1):'0';
-        const last5=(u.records||[]).slice(-8).reverse().map(r=>`<span class="tag ${r.status==='success'?'tag-success':'tag-warning'}" style="margin-right:4px">${r.time} API${r.api} ${r.status}${r.task?' '+esc(r.task):''}</span>`).join('');
+        const last5=(u.records||[]).slice(-8).reverse().map(r=>`<span class="tag ${r.status==='success'?'tag-success':'tag-warning'}" style="margin-right:4px">${r.time} 接口${r.api} ${r.status}${r.task?' '+esc(r.task):''}</span>`).join('');
         const fpTitle=u.fingerprint_name||u.fingerprint_id||u.fingerprint_key||u.device_id||'unknown';
-        const fpMeta=`user:${esc(u.username||'-')} group:${esc(u.group_id||'-')} device:${esc((u.device_id||'-').substring(0,16))} fp:${esc((u.fingerprint_id||u.fingerprint_key||'-').substring(0,16))} last:${esc(u.last_seen||'-')}`;
-        return `<div class="stats-user"><div class="stats-user-head"><div><b style="font-size:15px">${esc(fpTitle)}</b><div class="stats-records">${fpMeta}</div></div><div class="stats-nums"><span>Calls <b>${u.total}</b></span><span style="color:var(--success)">OK <b>${u.success}</b></span><span style="color:var(--danger)">Fail <b>${u.fail}</b></span><span style="color:var(--primary)">Rate <b>${rate}%</b></span></div></div>${last5?`<div class="stats-records">${last5}</div>`:''}</div>`;
+        const remark=u.account_remark?` <span style="color:var(--danger);font-weight:600">${esc(u.account_remark)}</span>`:'';
+        const fpMeta=`账号:${esc(u.username||'-')}${remark} 组:${esc(u.group_id||'-')} 设备:${esc((u.device_id||'-').substring(0,16))} 指纹:${esc((u.fingerprint_id||u.fingerprint_key||'-').substring(0,16))} 最后:${esc(u.last_seen||'-')}`;
+        return `<div class="stats-user"><div class="stats-user-head"><div><b style="font-size:15px">${esc(fpTitle)}</b><div class="stats-records">${fpMeta}</div></div><div class="stats-nums"><span>调用 <b>${u.total}</b></span><span style="color:var(--success)">成功 <b>${u.success}</b></span><span style="color:var(--danger)">失败 <b>${u.fail}</b></span><span style="color:var(--primary)">成功率 <b>${rate}%</b></span></div></div>${last5?`<div class="stats-records">${last5}</div>`:''}</div>`;
     }).join('');
     el.innerHTML=html;
+}
+
+async function clearStats(){
+    const sel=document.getElementById('statsDate');
+    const date=sel.value||'';
+    if(!confirm('确定清除 '+(date||'今天')+' 的指纹环境统计?'))return;
+    const r=await fetch(BASE+'?act=clear_stats&key='+encodeURIComponent(KEY)+(date?'&date='+encodeURIComponent(date):''));
+    const d=await r.json();
+    if(!d.ok) return alert(d.msg||'清除失败');
+    loadStats();
 }
 
 // ===== API1 Accounts =====
