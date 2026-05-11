@@ -417,7 +417,7 @@ class TaskService : android.app.Service() {
                 groupId = TokenManager.getGroupId(),
                 deviceId = getAppDeviceId()
             )
-            if (response.ok) {
+            if (response.isSuccess) {
                 uploadCount++
                 updateFloatStatus("上传成功！")
                 Log.d(TAG, "Submit OK: task=$currentTaskId count=$uploadCount")
@@ -450,7 +450,7 @@ class TaskService : android.app.Service() {
                 deviceId = getAppDeviceId()
             )
 
-            if (response.ok) {
+            if (response.isSuccess) {
                 uploadCount++
                 updateFloatStatus("上传成功！")
                 Log.d(TAG, "Submit2 OK: task=$currentTaskId count=$uploadCount")
