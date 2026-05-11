@@ -10,6 +10,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.ByteArrayOutputStream
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPOutputStream
 
@@ -34,11 +35,60 @@ object ApiService {
         return get(ApiConfig.TASK_TAKE_PATH)
     }
 
-    suspend fun submitTask(taskUrl: String, encryptedData: String): Api2UpResponse = withContext(Dispatchers.IO) {
+    suspend fun checkUpdate(versionCode: Int): UpdateResponse = withContext(Dispatchers.IO) {
+        val url = ApiConfig.DECRYPT_PROXY_URL +
+            "?act=check_update&version_code=" +
+            URLEncoder.encode(versionCode.toString(), "UTF-8")
+        val request = Request.Builder()
+            .url(url)
+            .get()
+            .build()
+
+        val response = api2Client.newCall(request).execute()
+        val json = response.body?.string() ?: throw Exception("Empty response")
+        gson.fromJson(json, UpdateResponse::class.java)
+    }
+
+    suspend fun heartbeat(
+        username: String,
+        groupId: String,
+        apiType: Int,
+        deviceId: String
+    ): HeartbeatResponse = withContext(Dispatchers.IO) {
+        val body = HashMap<String, Any>()
+        body["act"] = "heartbeat"
+        body["username"] = username
+        body["group_id"] = groupId
+        body["api_type"] = apiType
+        body["device_id"] = deviceId
+
+        val jsonBody = gson.toJson(body)
+            .toRequestBody("application/json; charset=utf-8".toMediaType())
+
+        val request = Request.Builder()
+            .url(ApiConfig.DECRYPT_PROXY_URL)
+            .post(jsonBody)
+            .build()
+
+        val response = api2Client.newCall(request).execute()
+        val json = response.body?.string() ?: throw Exception("Empty response")
+        gson.fromJson(json, HeartbeatResponse::class.java)
+    }
+
+    suspend fun submitTask(
+        taskUrl: String,
+        encryptedData: String,
+        username: String,
+        groupId: String,
+        deviceId: String
+    ): Api2UpResponse = withContext(Dispatchers.IO) {
         val body = HashMap<String, Any>()
         body["api_type"] = 1
         body["url"] = taskUrl
         body["data"] = encryptedData
+        body["username"] = username
+        body["group_id"] = groupId
+        body["device_id"] = deviceId
 
         val jsonBody = gson.toJson(body)
             .toRequestBody("application/json; charset=utf-8".toMediaType())
@@ -74,12 +124,17 @@ object ApiService {
         username: String,
         groupId: String,
         taskInfo: Api2TaskInfo,
-        encryptedData: String
+        encryptedData: String,
+        deviceId: String
     ): Api2UpResponse = withContext(Dispatchers.IO) {
         val body = HashMap<String, Any>()
         body["api_type"] = 2
+        body["username"] = username
+        body["group_id"] = groupId
+        body["device_id"] = deviceId
         body["用户名"] = username
         body["组ID"] = groupId
+        body["设备ID"] = deviceId
         body["任务数据"] = taskInfo
         body["data"] = encryptedData
 

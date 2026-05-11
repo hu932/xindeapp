@@ -73,3 +73,21 @@ data class Api2UpResponse(
     @SerializedName("ok") val ok: Boolean = false,
     @SerializedName("msg") val msg: String? = null
 )
+
+data class HeartbeatResponse(
+    @SerializedName("ok") val ok: Boolean = false,
+    @SerializedName("allowed") val allowed: Boolean = true,
+    @SerializedName("msg") val msg: String? = null,
+    @SerializedName("device_key") val deviceKey: String = ""
+)
+
+data class UpdateResponse(
+    @SerializedName("ok") val ok: Boolean = false,
+    @SerializedName("has_update") val hasUpdate: Boolean = false,
+    @SerializedName("version_code") val versionCode: Int = 0,
+    @SerializedName("version_name") val versionName: String = "",
+    @SerializedName("apk_url") val apkUrl: String = "",
+    @SerializedName("title") val title: String = "发现新版本",
+    @SerializedName("message") val message: String = "",
+    @SerializedName("force") val force: Boolean = false
+)

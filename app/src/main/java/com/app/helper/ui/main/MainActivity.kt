@@ -1,6 +1,8 @@
 package com.app.helper.ui.main
 
 import android.Manifest
+import android.app.DownloadManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -16,17 +18,26 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.app.helper.R
 import com.app.helper.databinding.ActivityMainBinding
+import com.app.helper.network.ApiService
+import com.app.helper.network.UpdateResponse
 import com.app.helper.service.TaskService
 import com.app.helper.ui.fp.FpManagerActivity
 import com.app.helper.ui.login.LoginActivity
 import com.app.helper.util.FingerprintManager
 import com.app.helper.util.TokenManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private var logReceiver: android.content.BroadcastReceiver? = null
+    private val activityScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -37,6 +48,7 @@ class MainActivity : AppCompatActivity() {
         initFingerprint()
         setupUI()
         registerLogReceiver()
+        checkAppUpdate()
 
         // Start service with float window
         if (checkOverlayPermission()) {
@@ -111,6 +123,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        activityScope.cancel()
         logReceiver?.let { try { unregisterReceiver(it) } catch (_: Exception) {} }
     }
 
@@ -138,6 +151,76 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 binding.tvCurrentFp.text = "当前指纹: 已加载"
             }
+        }
+    }
+
+    private fun checkAppUpdate() {
+        activityScope.launch {
+            try {
+                val currentCode = getCurrentVersionCode()
+                val update = ApiService.checkUpdate(currentCode)
+                if (update.ok && update.hasUpdate && update.apkUrl.isNotBlank()) {
+                    showUpdateDialog(update)
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun showUpdateDialog(update: UpdateResponse) {
+        val msg = buildString {
+            append("最新版本: ${update.versionName}")
+            if (update.message.isNotBlank()) {
+                append("\n\n")
+                append(update.message)
+            }
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(update.title.ifBlank { "发现新版本" })
+            .setMessage(msg)
+            .setPositiveButton("下载更新") { _, _ -> downloadApk(update.apkUrl, update.versionName) }
+            .apply {
+                if (!update.force) {
+                    setNegativeButton("稍后", null)
+                }
+            }
+            .create()
+        dialog.setCanceledOnTouchOutside(!update.force)
+        dialog.setOnKeyListener { _, keyCode, _ ->
+            update.force && keyCode == android.view.KeyEvent.KEYCODE_BACK
+        }
+        dialog.show()
+    }
+
+    private fun downloadApk(apkUrl: String, versionName: String) {
+        try {
+            val fileName = "TaskHelper-${versionName.ifBlank { "update" }}.apk"
+            val request = DownloadManager.Request(Uri.parse(apkUrl))
+                .setTitle("格界更新")
+                .setDescription("正在下载新版本")
+                .setMimeType("application/vnd.android.package-archive")
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                .setAllowedOverMetered(true)
+                .setAllowedOverRoaming(true)
+            val manager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            manager.enqueue(request)
+            Toast.makeText(this, "已开始下载，请在通知栏查看", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "下载失败: ${e.message}", Toast.LENGTH_LONG).show()
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl)))
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun getCurrentVersionCode(): Int {
+        return try {
+            val info = packageManager.getPackageInfo(packageName, 0)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode.toInt() else @Suppress("DEPRECATION") info.versionCode
+        } catch (_: Exception) {
+            0
         }
     }
 

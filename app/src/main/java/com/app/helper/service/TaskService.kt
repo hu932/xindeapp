@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -66,6 +67,9 @@ class TaskService : android.app.Service() {
     private var statusMessage = ""
     private var uploadCount = 0
     private var countdownJob: Job? = null
+    private var heartbeatJob: Job? = null
+    @Volatile private var deviceAllowed = true
+    @Volatile private var deviceBlockedMsg = "设备已被禁用"
 
     private var touchDownX = 0f
     private var touchDownY = 0f
@@ -89,6 +93,7 @@ class TaskService : android.app.Service() {
         startForeground(NOTIFICATION_ID, createNotification())
         registerDataReceiver()
         createFloatWindow()
+        startHeartbeat()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -109,6 +114,7 @@ class TaskService : android.app.Service() {
         isAutoRunning = false
         serviceScope.cancel()
         countdownJob?.cancel()
+        heartbeatJob?.cancel()
         removeFloatWindow()
         unregisterDataReceiver()
     }
@@ -198,6 +204,10 @@ class TaskService : android.app.Service() {
 
     private fun toggleAutoTask() {
         if (isUploading) { updateFloatStatus("正在上传中..."); return }
+        if (!deviceAllowed) {
+            stopAutoForDeviceBlock()
+            return
+        }
         if (isAutoRunning) {
             isAutoRunning = false
             countdownJob?.cancel()
@@ -215,6 +225,10 @@ class TaskService : android.app.Service() {
 
     private fun startNextTaskCycle() {
         if (!isAutoRunning) return
+        if (!deviceAllowed) {
+            stopAutoForDeviceBlock()
+            return
+        }
         val min = delayMin.coerceAtLeast(1)
         val max = delayMax.coerceAtLeast(min)
         val delaySec = (min..max).random()
@@ -235,10 +249,18 @@ class TaskService : android.app.Service() {
     }
 
     private fun claimAndExecuteTask() {
-        if (TokenManager.getApiType() == TokenManager.API_TYPE_2) {
-            claimAndExecuteTask2()
-        } else {
-            claimAndExecuteTask1()
+        if (!deviceAllowed) {
+            stopAutoForDeviceBlock()
+            return
+        }
+        serviceScope.launch {
+            sendHeartbeat()
+            if (!deviceAllowed) return@launch
+            if (TokenManager.getApiType() == TokenManager.API_TYPE_2) {
+                claimAndExecuteTask2()
+            } else {
+                claimAndExecuteTask1()
+            }
         }
     }
 
@@ -362,13 +384,23 @@ class TaskService : android.app.Service() {
 
     private suspend fun submitTaskResult1(fileContent: String) {
         try {
+            if (!deviceAllowed) {
+                stopAutoForDeviceBlock()
+                return
+            }
             val encryptedData = extractEncryptedData(fileContent)
 
             val pdpUrl = "https://shopee.tw/api/v4/pdp/get_pc?" +
                 "display_model_id=0&item_id=$currentItemId&model_selection_logic=3" +
                 "&shop_id=$currentShopId&tz_offset_in_minutes=480&detail_level=0"
 
-            val response = ApiService.submitTask(pdpUrl, encryptedData)
+            val response = ApiService.submitTask(
+                taskUrl = pdpUrl,
+                encryptedData = encryptedData,
+                username = TokenManager.getUsername(),
+                groupId = TokenManager.getGroupId(),
+                deviceId = getDeviceId()
+            )
             if (response.ok) {
                 uploadCount++
                 updateFloatStatus("上传成功！")
@@ -387,6 +419,10 @@ class TaskService : android.app.Service() {
 
     private suspend fun submitTaskResult2(fileContent: String) {
         try {
+            if (!deviceAllowed) {
+                stopAutoForDeviceBlock()
+                return
+            }
             val encryptedData = extractEncryptedData(fileContent)
             val taskInfo = currentApi2TaskInfo ?: Api2TaskInfo()
 
@@ -394,7 +430,8 @@ class TaskService : android.app.Service() {
                 username = TokenManager.getUsername(),
                 groupId = TokenManager.getGroupId(),
                 taskInfo = taskInfo,
-                encryptedData = encryptedData
+                encryptedData = encryptedData,
+                deviceId = getDeviceId()
             )
 
             if (response.ok) {
@@ -421,6 +458,49 @@ class TaskService : android.app.Service() {
         } catch (_: Exception) {
             fileContent
         }
+    }
+
+    private fun startHeartbeat() {
+        heartbeatJob?.cancel()
+        heartbeatJob = serviceScope.launch {
+            while (isActive) {
+                sendHeartbeat()
+                delay(30_000)
+            }
+        }
+    }
+
+    private suspend fun sendHeartbeat() {
+        try {
+            val response = ApiService.heartbeat(
+                username = TokenManager.getUsername(),
+                groupId = TokenManager.getGroupId(),
+                apiType = TokenManager.getApiType(),
+                deviceId = getDeviceId()
+            )
+            if (!response.ok || !response.allowed) {
+                deviceAllowed = false
+                deviceBlockedMsg = response.msg ?: "设备已被禁用"
+                stopAutoForDeviceBlock()
+            } else {
+                deviceAllowed = true
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Heartbeat failed", e)
+        }
+    }
+
+    private fun stopAutoForDeviceBlock() {
+        isAutoRunning = false
+        isUploading = false
+        countdownJob?.cancel()
+        handler.post { tvAction?.text = "一键做任务" }
+        updateFloatStatus(deviceBlockedMsg)
+    }
+
+    private fun getDeviceId(): String {
+        val androidId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+        return androidId?.takeIf { it.isNotBlank() } ?: "android-${Build.MODEL}"
     }
 
     // ==================== Auto Task Logic ====================
