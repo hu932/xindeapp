@@ -16,6 +16,7 @@ $APK_DIR = __DIR__ . '/app_updates';
 $STATS_DIR = __DIR__ . '/daily_stats';
 $API1_TOKEN_FILE = __DIR__ . '/api1_token.json';
 $API1_ACCOUNTS_FILE = __DIR__ . '/api1_allowed_accounts.json';
+$API2_ACCOUNTS_FILE = __DIR__ . '/api2_allowed_accounts.json';
 $MAX_LOGS = 500;
 
 $API1_AUTH = [
@@ -138,25 +139,62 @@ function readApi1AllowedAccounts(string $file): array {
     if (!is_array($accounts)) return [];
     $result = [];
     foreach ($accounts as $account) {
-        $name = trim((string)$account);
-        if ($name !== '') $result[$name] = true;
+        if (is_array($account)) {
+            $name = trim((string)($account['username'] ?? $account['name'] ?? ''));
+            $remark = trim((string)($account['remark'] ?? ''));
+        } else {
+            $name = trim((string)$account);
+            $remark = '';
+        }
+        if ($name !== '') $result[$name] = ['username' => $name, 'remark' => $remark];
     }
-    return array_keys($result);
+    return array_values($result);
 }
 
-function saveApi1AllowedAccounts(string $file, array $accounts): array {
+function parseAccountLines(string $raw): array {
     $clean = [];
-    foreach ($accounts as $account) {
-        $name = trim((string)$account);
-        if ($name !== '') $clean[$name] = true;
+    $lines = preg_split('/\r\n|\r|\n/', $raw) ?: [];
+    foreach ($lines as $line) {
+        $line = trim((string)$line);
+        if ($line === '') continue;
+        if (strpos($line, '|') !== false) {
+            [$name, $remark] = array_pad(explode('|', $line, 2), 2, '');
+        } else {
+            $parts = preg_split('/\s+/', $line, 2) ?: [];
+            $name = $parts[0] ?? '';
+            $remark = $parts[1] ?? '';
+        }
+        $name = trim((string)$name);
+        if ($name !== '') $clean[$name] = ['username' => $name, 'remark' => trim((string)$remark)];
     }
-    $list = array_keys($clean);
-    sort($list);
+    ksort($clean);
+    return array_values($clean);
+}
+
+function saveApiAccounts(string $file, array $accounts): array {
     @file_put_contents($file, json_encode([
-        'accounts' => $list,
+        'accounts' => array_values($accounts),
         'updated_at' => date('Y-m-d H:i:s'),
     ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), LOCK_EX);
-    return ['ok' => true, 'data' => $list, 'count' => count($list)];
+    return ['ok' => true, 'data' => array_values($accounts), 'count' => count($accounts)];
+}
+
+function saveApi1AllowedAccounts(string $file, string $raw): array {
+    return saveApiAccounts($file, parseAccountLines($raw));
+}
+
+function accountNames(array $accounts): array {
+    return array_values(array_filter(array_map(fn($a) => is_array($a) ? (string)($a['username'] ?? '') : (string)$a, $accounts)));
+}
+
+function accountRemarkMap(array $accounts): array {
+    $map = [];
+    foreach ($accounts as $account) {
+        if (!is_array($account)) continue;
+        $username = (string)($account['username'] ?? '');
+        if ($username !== '') $map[$username] = (string)($account['remark'] ?? '');
+    }
+    return $map;
 }
 
 function api1LoginWithPassword(string $url, string $username, string $password): array {
@@ -221,6 +259,7 @@ function deviceKey(string $username, string $deviceId): string {
 }
 
 function updateDeviceHeartbeat(string $file, array $input): array {
+    global $API1_ACCOUNTS_FILE, $API2_ACCOUNTS_FILE;
     $username = trim((string)($input['username'] ?? $input['用户名'] ?? ''));
     $groupId = trim((string)($input['group_id'] ?? $input['组ID'] ?? ''));
     $deviceId = trim((string)($input['device_id'] ?? $input['设备ID'] ?? ''));
@@ -231,15 +270,18 @@ function updateDeviceHeartbeat(string $file, array $input): array {
     $key = deviceKey($username, $deviceId);
     $old = $devices[$key] ?? [];
     $disabled = !empty($old['disabled']);
+    $apiType = (int)($input['api_type'] ?? ($old['api_type'] ?? 0));
+    $remarkMap = accountRemarkMap(readApi1AllowedAccounts($apiType === 2 ? $API2_ACCOUNTS_FILE : $API1_ACCOUNTS_FILE));
     $devices[$key] = array_merge($old, [
         'key' => $key,
         'username' => $username,
+        'account_remark' => $remarkMap[$username] ?? ($old['account_remark'] ?? ''),
         'group_id' => $groupId,
         'device_id' => $deviceId,
         'fingerprint_key' => trim((string)($input['fingerprint_key'] ?? '')),
         'fingerprint_id' => trim((string)($input['fingerprint_id'] ?? '')),
         'fingerprint_name' => trim((string)($input['fingerprint_name'] ?? '')),
-        'api_type' => (int)($input['api_type'] ?? ($old['api_type'] ?? 0)),
+        'api_type' => $apiType,
         'ip' => $_SERVER['REMOTE_ADDR'] ?? '',
         'last_seen' => date('Y-m-d H:i:s'),
         'first_seen' => $old['first_seen'] ?? date('Y-m-d H:i:s'),
@@ -550,6 +592,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['act'])) {
 
     if ($act === 'devices') {
         $devices = array_values(readDeviceControls($DEVICE_FILE));
+        $api1Remarks = accountRemarkMap(readApi1AllowedAccounts($API1_ACCOUNTS_FILE));
+        $api2Remarks = accountRemarkMap(readApi1AllowedAccounts($API2_ACCOUNTS_FILE));
+        foreach ($devices as &$device) {
+            $u = (string)($device['username'] ?? '');
+            $device['account_remark'] = ((int)($device['api_type'] ?? 0) === 2 ? ($api2Remarks[$u] ?? '') : ($api1Remarks[$u] ?? '')) ?: ($device['account_remark'] ?? '');
+        }
+        unset($device);
         $now = time();
         $onlineThreshold = 120;
         $devices = array_filter($devices, function($d) use ($now, $onlineThreshold) {
@@ -581,9 +630,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['act'])) {
     }
 
     if ($act === 'save_api1_accounts') {
-        $raw = (string)($_GET['accounts'] ?? '');
-        $accounts = preg_split('/[\r\n,]+/', $raw) ?: [];
-        jsonResp(saveApi1AllowedAccounts($API1_ACCOUNTS_FILE, $accounts));
+        jsonResp(saveApi1AllowedAccounts($API1_ACCOUNTS_FILE, (string)($_GET['accounts'] ?? '')));
+    }
+
+    if ($act === 'api2_accounts') {
+        jsonResp(['ok' => true, 'data' => readApi1AllowedAccounts($API2_ACCOUNTS_FILE)]);
+    }
+
+    if ($act === 'save_api2_accounts') {
+        jsonResp(saveApiAccounts($API2_ACCOUNTS_FILE, parseAccountLines((string)($_GET['accounts'] ?? ''))));
     }
 
     if ($act === 'stats') {
@@ -684,7 +739,7 @@ if ($postAct === 'api1_login') {
     }
 
     $allowed = readApi1AllowedAccounts($API1_ACCOUNTS_FILE);
-    if (!in_array($username, $allowed, true)) {
+    if (!in_array($username, accountNames($allowed), true)) {
         appendLog($LOG_FILE, [
             'time' => date('Y-m-d H:i:s'),
             'api_type' => 1,
@@ -1096,7 +1151,7 @@ pre.resp{background:#f5f5f5;padding:10px;border-radius:4px;font-size:12px;overfl
 
     <!-- Accounts -->
     <div class="page hidden" id="page-accounts">
-        <div class="card"><div class="card-head"><h3>接口1允许账号</h3></div><div class="card-body"><div class="form-item"><label>每行一个用户名，未设置的账号登录接口1会被拒绝</label><textarea id="api1Accounts" style="min-height:220px;font-family:monospace"></textarea></div><div style="margin-top:14px;display:flex;gap:10px;align-items:center"><button class="btn btn-primary" onclick="saveApi1Accounts()">保存账号</button><span id="api1AccountsResult" style="font-size:13px;color:var(--muted)"></span></div></div></div>
+        <div class="card"><div class="card-head"><h3>接口账号备注</h3></div><div class="card-body"><div class="form-grid"><div class="form-item"><label>接口1允许账号。每行：账号 备注，未设置账号会拒绝登录</label><textarea id="api1Accounts" style="min-height:260px;font-family:monospace"></textarea></div><div class="form-item"><label>接口2账号备注。每行：账号 备注，用于在线设备和统计显示</label><textarea id="api2Accounts" style="min-height:260px;font-family:monospace"></textarea></div></div><div style="margin-top:14px;display:flex;gap:10px;align-items:center"><button class="btn btn-primary" onclick="saveApiAccounts()">保存账号备注</button><span id="apiAccountsResult" style="font-size:13px;color:var(--muted)"></span></div></div></div>
     </div>
 
     <!-- Update -->
@@ -1139,7 +1194,7 @@ function showAdmin() {
 
 if (KEY) { fetch(BASE+'?act=logs&limit=1&key='+encodeURIComponent(KEY)).then(r=>r.json()).then(d=>{ if(d.ok!==false||d.msg!=='密码错误') showAdmin(); else { KEY=''; localStorage.removeItem('admin_key'); }}).catch(()=>{}); }
 
-const pageTitles = {dashboard:'仪表盘',logs:'转发日志',devices:'在线设备',stats:'环境统计',accounts:'接口1账号',update:'更新发布',data:'解密数据'};
+const pageTitles = {dashboard:'仪表盘',logs:'转发日志',devices:'在线设备',stats:'环境统计',accounts:'接口账号备注',update:'更新发布',data:'解密数据'};
 let currentPage = 'dashboard';
 function switchPage(name, el) {
     if (deviceTimer && name !== 'devices') { clearInterval(deviceTimer); deviceTimer = null; }
@@ -1242,7 +1297,7 @@ async function loadDevices() {
         const btn=dis
             ?`<button class="btn btn-success btn-sm" onclick="toggleDevice('${esc(dv.key)}',0)">启用</button>`
             :`<button class="btn btn-danger btn-sm" onclick="toggleDevice('${esc(dv.key)}',1)">禁用</button>`;
-        return `<div class="device-card"><div class="device-info"><b>${esc(dv.username||'-')}</b> ${stTag}<div class="device-meta"><span>组:${esc(dv.group_id||'-')}</span><span>接口:${dv.api_type||'-'}</span><span>设备:${esc((dv.device_id||'').substring(0,12))}</span><span>指纹:${esc(dv.fingerprint_name||((dv.fingerprint_id||dv.fingerprint_key||'').substring(0,12))||'-')}</span><span>IP:${esc(dv.ip||'-')}</span><span>心跳:${esc(dv.last_seen||'-')}</span></div>${dv.disabled_reason?`<div style="margin-top:4px;font-size:12px;color:var(--danger)">${esc(dv.disabled_reason)}</div>`:''}</div><div>${btn}</div></div>`;
+        return `<div class="device-card"><div class="device-info"><b>${esc(dv.username||'-')}</b> ${stTag}${dv.account_remark?`<div style="margin-top:4px;font-size:12px;color:var(--danger);font-weight:600">${esc(dv.account_remark)}</div>`:''}<div class="device-meta"><span>组:${esc(dv.group_id||'-')}</span><span>接口:${dv.api_type||'-'}</span><span>设备:${esc((dv.device_id||'').substring(0,12))}</span><span>指纹:${esc(dv.fingerprint_name||((dv.fingerprint_id||dv.fingerprint_key||'').substring(0,12))||'-')}</span><span>IP:${esc(dv.ip||'-')}</span><span>心跳:${esc(dv.last_seen||'-')}</span></div>${dv.disabled_reason?`<div style="margin-top:4px;font-size:12px;color:var(--danger)">${esc(dv.disabled_reason)}</div>`:''}</div><div>${btn}</div></div>`;
     }).join('');
 }
 async function toggleDevice(dk,dis){
@@ -1277,18 +1332,23 @@ async function loadStats(){
 
 // ===== API1 Accounts =====
 async function loadApi1Accounts(){
-    const r=await fetch(BASE+'?act=api1_accounts&key='+encodeURIComponent(KEY));
-    const d=await r.json();
-    if(!d.ok)return;
-    document.getElementById('api1Accounts').value=(d.data||[]).join('\n');
-    document.getElementById('api1AccountsResult').textContent='已加载 '+(d.data||[]).length+' 个账号';
+    const [r1,r2]=await Promise.all([
+        fetch(BASE+'?act=api1_accounts&key='+encodeURIComponent(KEY)).then(r=>r.json()),
+        fetch(BASE+'?act=api2_accounts&key='+encodeURIComponent(KEY)).then(r=>r.json())
+    ]);
+    if(r1.ok) document.getElementById('api1Accounts').value=(r1.data||[]).map(a=>`${a.username||a}${a.remark?' '+a.remark:''}`).join('\n');
+    if(r2.ok) document.getElementById('api2Accounts').value=(r2.data||[]).map(a=>`${a.username||a}${a.remark?' '+a.remark:''}`).join('\n');
+    document.getElementById('apiAccountsResult').textContent='已加载 接口1 '+((r1.data||[]).length)+' 个，接口2 '+((r2.data||[]).length)+' 个';
 }
-async function saveApi1Accounts(){
-    const accounts=document.getElementById('api1Accounts').value;
-    document.getElementById('api1AccountsResult').textContent='保存中...';
-    const r=await fetch(BASE+'?act=save_api1_accounts&key='+encodeURIComponent(KEY)+'&accounts='+encodeURIComponent(accounts));
-    const d=await r.json();
-    document.getElementById('api1AccountsResult').textContent=d.ok?'已保存 '+(d.count||0)+' 个账号':(d.msg||'保存失败');
+async function saveApiAccounts(){
+    const api1=document.getElementById('api1Accounts').value;
+    const api2=document.getElementById('api2Accounts').value;
+    document.getElementById('apiAccountsResult').textContent='保存中...';
+    const [d1,d2]=await Promise.all([
+        fetch(BASE+'?act=save_api1_accounts&key='+encodeURIComponent(KEY)+'&accounts='+encodeURIComponent(api1)).then(r=>r.json()),
+        fetch(BASE+'?act=save_api2_accounts&key='+encodeURIComponent(KEY)+'&accounts='+encodeURIComponent(api2)).then(r=>r.json())
+    ]);
+    document.getElementById('apiAccountsResult').textContent=(d1.ok&&d2.ok)?`已保存 接口1 ${d1.count||0} 个，接口2 ${d2.count||0} 个`:(d1.msg||d2.msg||'保存失败');
 }
 
 // ===== Update =====
