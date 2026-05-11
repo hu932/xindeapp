@@ -74,7 +74,8 @@ data class Api2UpResponse(
     @SerializedName("code") val code: String = "",
     @SerializedName("msg") val msg: String? = null
 ) {
-    val isSuccess: Boolean get() = ok || code == "200" || code.equals("SUCCESS", ignoreCase = true)
+    val isApi1Success: Boolean get() = code == "200" || code.equals("SUCCESS", ignoreCase = true)
+    val isApi2Success: Boolean get() = ok
 }
 
 data class HeartbeatResponse(
