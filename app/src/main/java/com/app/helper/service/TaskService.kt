@@ -70,6 +70,7 @@ class TaskService : android.app.Service() {
     private var heartbeatJob: Job? = null
     @Volatile private var deviceAllowed = true
     @Volatile private var deviceBlockedMsg = "设备已被禁用"
+    private var consecutiveTimeouts = 0
 
     private var touchDownX = 0f
     private var touchDownY = 0f
@@ -378,10 +379,21 @@ class TaskService : android.app.Service() {
         val timeout = 90_000L
         val start = System.currentTimeMillis()
         while (System.currentTimeMillis() - start < timeout) {
-            if (pendingFileContent != null) return true
+            if (pendingFileContent != null) {
+                consecutiveTimeouts = 0
+                return true
+            }
             delay(500)
         }
-        updateFloatStatus("数据回传超时(${timeout/1000}s)")
+        consecutiveTimeouts++
+        if (consecutiveTimeouts >= 2) {
+            isAutoRunning = false
+            handler.post { tvAction?.text = "一键做任务" }
+            updateFloatStatus("疑似风控！连续${consecutiveTimeouts}次超时\n已自动暂停，请检查环境")
+            consecutiveTimeouts = 0
+            return false
+        }
+        updateFloatStatus("数据回传超时(${timeout/1000}s)\n连续超时${consecutiveTimeouts}次，再超时将暂停")
         if (isAutoRunning) startNextTaskCycle()
         return false
     }
