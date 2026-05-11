@@ -86,6 +86,8 @@ class TaskService : android.app.Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private var updateCheckJob: Job? = null
+
     override fun onCreate() {
         super.onCreate()
         isRunning = true
@@ -94,6 +96,7 @@ class TaskService : android.app.Service() {
         registerDataReceiver()
         createFloatWindow()
         startHeartbeat()
+        startUpdateCheck()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -115,6 +118,7 @@ class TaskService : android.app.Service() {
         serviceScope.cancel()
         countdownJob?.cancel()
         heartbeatJob?.cancel()
+        updateCheckJob?.cancel()
         removeFloatWindow()
         unregisterDataReceiver()
     }
@@ -501,6 +505,35 @@ class TaskService : android.app.Service() {
     private fun getAppDeviceId(): String {
         val androidId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
         return androidId?.takeIf { it.isNotBlank() } ?: "android-${Build.MODEL}"
+    }
+
+    private fun startUpdateCheck() {
+        updateCheckJob?.cancel()
+        updateCheckJob = serviceScope.launch {
+            delay(30 * 60_000L)
+            while (isActive) {
+                try {
+                    val currentCode = packageManager.getPackageInfo(packageName, 0).let {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) it.longVersionCode.toInt()
+                        else @Suppress("DEPRECATION") it.versionCode
+                    }
+                    val update = ApiService.checkUpdate(currentCode)
+                    if (update.ok && update.hasUpdate && update.apkUrl.isNotBlank()) {
+                        val intent = Intent("com.app.helper.UPDATE_ACTION").apply {
+                            putExtra("version_name", update.versionName)
+                            putExtra("apk_url", update.apkUrl)
+                            putExtra("title", update.title)
+                            putExtra("message", update.message)
+                            putExtra("force", update.force)
+                        }
+                        sendBroadcast(intent)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Update check failed", e)
+                }
+                delay(30 * 60_000L)
+            }
+        }
     }
 
     // ==================== Auto Task Logic ====================

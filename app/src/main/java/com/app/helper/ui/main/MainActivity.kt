@@ -37,6 +37,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private var logReceiver: android.content.BroadcastReceiver? = null
+    private var updateReceiver: android.content.BroadcastReceiver? = null
     private val activityScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -48,6 +49,7 @@ class MainActivity : AppCompatActivity() {
         initFingerprint()
         setupUI()
         registerLogReceiver()
+        registerUpdateReceiver()
         checkAppUpdate()
 
         // Start service with float window
@@ -121,10 +123,34 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun registerUpdateReceiver() {
+        updateReceiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                val update = UpdateResponse(
+                    ok = true,
+                    hasUpdate = true,
+                    versionName = intent.getStringExtra("version_name") ?: "",
+                    apkUrl = intent.getStringExtra("apk_url") ?: "",
+                    title = intent.getStringExtra("title") ?: "发现新版本",
+                    message = intent.getStringExtra("message") ?: "",
+                    force = intent.getBooleanExtra("force", false)
+                )
+                if (update.apkUrl.isNotBlank()) showUpdateDialog(update)
+            }
+        }
+        val filter = android.content.IntentFilter("com.app.helper.UPDATE_ACTION")
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(updateReceiver, filter, RECEIVER_EXPORTED)
+        } else {
+            registerReceiver(updateReceiver, filter)
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         activityScope.cancel()
         logReceiver?.let { try { unregisterReceiver(it) } catch (_: Exception) {} }
+        updateReceiver?.let { try { unregisterReceiver(it) } catch (_: Exception) {} }
     }
 
     private fun initFingerprint() {
@@ -178,7 +204,7 @@ class MainActivity : AppCompatActivity() {
         val dialog = AlertDialog.Builder(this)
             .setTitle(update.title.ifBlank { "发现新版本" })
             .setMessage(msg)
-            .setPositiveButton("下载更新") { _, _ -> downloadApk(update.apkUrl, update.versionName) }
+            .setPositiveButton("下载更新", null)
             .apply {
                 if (!update.force) {
                     setNegativeButton("稍后", null)
@@ -186,8 +212,20 @@ class MainActivity : AppCompatActivity() {
             }
             .create()
         dialog.setCanceledOnTouchOutside(!update.force)
+        dialog.setCancelable(!update.force)
         dialog.setOnKeyListener { _, keyCode, _ ->
             update.force && keyCode == android.view.KeyEvent.KEYCODE_BACK
+        }
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                downloadApk(update.apkUrl, update.versionName)
+                if (update.force) {
+                    dialog.setMessage("正在下载，请在通知栏查看进度。\n安装完成后重新打开App。\n\n${msg}")
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).text = "重新下载"
+                } else {
+                    dialog.dismiss()
+                }
+            }
         }
         dialog.show()
     }
