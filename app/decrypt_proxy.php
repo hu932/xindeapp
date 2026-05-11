@@ -13,6 +13,7 @@ $LOG_FILE = __DIR__ . '/decrypt_proxy_logs.jsonl';
 $DEVICE_FILE = __DIR__ . '/device_controls.json';
 $UPDATE_FILE = __DIR__ . '/app_update.json';
 $APK_DIR = __DIR__ . '/app_updates';
+$STATS_DIR = __DIR__ . '/daily_stats';
 $MAX_LOGS = 500;
 
 $TARGETS = [
@@ -310,6 +311,56 @@ function saveUploadDump(string $dumpId, array $detail): string {
     return $uploadId;
 }
 
+// ===== 统计函数 =====
+function getStatsFile(string $dir, string $date = ''): string {
+    if ($date === '') $date = date('Y-m-d');
+    if (!is_dir($dir)) @mkdir($dir, 0755, true);
+    return $dir . '/' . $date . '.json';
+}
+
+function readDayStats(string $dir, string $date = ''): array {
+    $file = getStatsFile($dir, $date);
+    if (!is_file($file)) return [];
+    $data = json_decode((string)@file_get_contents($file), true);
+    return is_array($data) ? $data : [];
+}
+
+function recordStats(string $dir, string $username, int $apiType, string $status, string $taskId = ''): void {
+    $date = date('Y-m-d');
+    $file = getStatsFile($dir, $date);
+    $stats = readDayStats($dir, $date);
+
+    if (!isset($stats[$username])) {
+        $stats[$username] = ['total' => 0, 'success' => 0, 'fail' => 0, 'records' => []];
+    }
+    $stats[$username]['total']++;
+    if ($status === 'success') {
+        $stats[$username]['success']++;
+    } else {
+        $stats[$username]['fail']++;
+    }
+    $record = ['time' => date('H:i:s'), 'api' => $apiType, 'status' => $status];
+    if ($taskId !== '') $record['task'] = $taskId;
+    $stats[$username]['records'][] = $record;
+    if (count($stats[$username]['records']) > 200) {
+        $stats[$username]['records'] = array_slice($stats[$username]['records'], -200);
+    }
+
+    @file_put_contents($file, json_encode($stats, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), LOCK_EX);
+}
+
+function getStatsDateList(string $dir, int $limit = 30): array {
+    if (!is_dir($dir)) return [];
+    $files = glob("$dir/*.json");
+    if (!is_array($files)) return [];
+    $dates = [];
+    foreach ($files as $f) {
+        $dates[] = basename($f, '.json');
+    }
+    rsort($dates);
+    return array_slice($dates, 0, $limit);
+}
+
 // ===== 前端页面 =====
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['act'])) {
     $act = $_GET['act'];
@@ -351,6 +402,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['act'])) {
 
     if ($act === 'save_update') {
         jsonResp(saveUpdateConfig($UPDATE_FILE, $_GET));
+    }
+
+    if ($act === 'stats') {
+        $date = trim((string)($_GET['date'] ?? date('Y-m-d')));
+        $stats = readDayStats($STATS_DIR, $date);
+        $summary = [];
+        foreach ($stats as $user => $info) {
+            $summary[] = [
+                'username' => $user,
+                'total' => $info['total'] ?? 0,
+                'success' => $info['success'] ?? 0,
+                'fail' => $info['fail'] ?? 0,
+                'records' => $info['records'] ?? [],
+            ];
+        }
+        usort($summary, fn($a, $b) => $b['total'] - $a['total']);
+        jsonResp(['ok' => true, 'date' => $date, 'dates' => getStatsDateList($STATS_DIR), 'data' => $summary]);
     }
 
     if ($act === 'clear') {
@@ -580,12 +648,19 @@ if ($result['error']) {
     $logEntry['status'] = 'forward_fail';
     $logEntry['error']  = $result['error'];
     appendLog($LOG_FILE, $logEntry, $MAX_LOGS);
+    $statsUser = $logEntry['username'] ?? $input['username'] ?? $input['用户名'] ?? 'unknown';
+    recordStats($STATS_DIR, $statsUser, $apiType, 'forward_fail');
     jsonResp(['ok' => false, 'msg' => '转发失败: ' . $result['error']]);
 }
 
 $logEntry['status']   = $serverResp['ok'] ?? false ? 'success' : 'task_server_error';
 $logEntry['response'] = $serverResp ?? $result['response'];
 appendLog($LOG_FILE, $logEntry, $MAX_LOGS);
+
+$statsUser = $logEntry['username'] ?? $input['username'] ?? $input['用户名'] ?? 'unknown';
+$statsTaskId = '';
+if (is_array($taskInfo ?? null)) $statsTaskId = $taskInfo['ID'] ?? '';
+recordStats($STATS_DIR, $statsUser, $apiType, $logEntry['status'], $statsTaskId);
 
 if ($serverResp) {
     jsonResp($serverResp);
@@ -673,12 +748,14 @@ pre{background:#0f172a;color:#dbeafe;padding:12px;border-radius:6px;font-size:12
     <button class="btn-dump" onclick="openDumpList()">解密数据列表</button>
     <button class="btn-devices" onclick="loadDevices()">设备控制</button>
     <button class="btn-update" onclick="openUpdateConfig()">更新配置</button>
+    <button class="btn-secondary" onclick="loadStats()">环境统计</button>
     <button class="btn-auto" onclick="toggleAuto()" id="autoBtn">自动刷新</button>
     <button class="btn-clear" onclick="clearLogs()">清空日志</button>
     <span id="autoLabel"></span>
 </div>
 <div class="stats" id="stats"></div>
 <div class="panel hidden" id="updatePanel"></div>
+<div class="panel hidden" id="statsPanel"><div class="panel-head"><div><h2>环境统计</h2><p>每日用户使用次数和明细</p></div><div style="display:flex;gap:8px;align-items:center"><select id="statsDate" onchange="loadStats()" style="height:36px;border:1px solid var(--line);border-radius:6px;padding:0 8px;font-size:13px"></select><button class="btn-secondary" onclick="document.getElementById('statsPanel').classList.add('hidden')">收起</button></div></div><div class="panel-body"><div id="statsBody"><div class="empty">加载中...</div></div></div></div>
 <div class="panel hidden" id="devicePanel"><div class="panel-head"><div><h2>设备控制</h2><p>禁用后App心跳和上传都会被拦截</p></div></div><div class="panel-body"><div class="device-list" id="deviceList"></div></div></div>
 <div class="panel"><div class="panel-head"><div><h2>转发日志</h2><p>查看解密、上传和任务服务器响应</p></div></div><div class="panel-body"><div class="log-list" id="logList"><div class="empty">输入密码后点击加载</div></div></div></div>
 </div>
@@ -938,6 +1015,58 @@ async function clearLogs() {
     const d = await r.json();
     alert(d.msg || '已清空');
     loadLogs();
+}
+
+async function loadStats() {
+    const key = getKey();
+    if (!key) return alert('请输入密码');
+    const sel = document.getElementById('statsDate');
+    const date = sel.value || '';
+    try {
+        const r = await fetch(BASE + '?act=stats&key=' + encodeURIComponent(key) + (date ? '&date=' + encodeURIComponent(date) : ''));
+        const d = await r.json();
+        if (!d.ok) return alert(d.msg || '加载统计失败');
+        document.getElementById('statsPanel').classList.remove('hidden');
+        if (d.dates && d.dates.length) {
+            const curVal = sel.value || d.date;
+            sel.innerHTML = d.dates.map(dt => `<option value="${dt}" ${dt===curVal?'selected':''}>${dt}</option>`).join('');
+        }
+        renderStats2(d.data || [], d.date);
+    } catch (e) { alert('请求失败: ' + e.message); }
+}
+
+function renderStats2(users, date) {
+    const el = document.getElementById('statsBody');
+    if (!users.length) { el.innerHTML = '<div class="empty">当天暂无数据</div>'; return; }
+    const totalAll = users.reduce((s,u) => s+u.total, 0);
+    const okAll = users.reduce((s,u) => s+u.success, 0);
+    const failAll = users.reduce((s,u) => s+u.fail, 0);
+    let html = `<div class="stats" style="margin-bottom:16px">
+        <div class="stat">日期<b>${escHtml(date)}</b></div>
+        <div class="stat">总用户<b>${users.length}</b></div>
+        <div class="stat">总请求<b>${totalAll}</b></div>
+    </div>`;
+    html += users.map(u => {
+        const rate = u.total > 0 ? ((u.success/u.total)*100).toFixed(1) : '0';
+        const last5 = (u.records || []).slice(-5).reverse();
+        const detail = last5.map(r =>
+            `<span style="font-size:12px;color:var(--muted)">${r.time}</span> ` +
+            `<span class="tag ${r.status==='success'?'tag-ok':'tag-warn'}">${r.status}</span>`
+        ).join(' &nbsp; ');
+        return `<div class="log-item ${u.fail>0?'task_server_error':'success'}" style="border-left-width:4px">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+                <div><b style="font-size:16px">${escHtml(u.username)}</b></div>
+                <div style="display:flex;gap:16px;font-size:14px">
+                    <span>总计 <b>${u.total}</b></span>
+                    <span style="color:var(--green)">成功 <b>${u.success}</b></span>
+                    <span style="color:var(--red)">失败 <b>${u.fail}</b></span>
+                    <span style="color:var(--blue)">成功率 <b>${rate}%</b></span>
+                </div>
+            </div>
+            ${detail ? `<div style="margin-top:8px">最近: ${detail}</div>` : ''}
+        </div>`;
+    }).join('');
+    el.innerHTML = html;
 }
 
 function toggleAuto() {
