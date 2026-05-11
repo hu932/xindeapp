@@ -20,7 +20,7 @@
         android:name=".App"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="格界13-14"
+        android:label="格界"
         android:networkSecurityConfig="@xml/network_security_config"
         android:requestLegacyExternalStorage="true"
         android:supportsRtl="true"
@@ -54,7 +54,7 @@
 
         <provider
             android:name=".service.FingerprintProvider"
-            android:authorities="com.yh.csyxgl.vivo.provider"
+            android:authorities="com.spotify.music.provider"
             android:exported="true"
             android:grantUriPermissions="true" />
 
