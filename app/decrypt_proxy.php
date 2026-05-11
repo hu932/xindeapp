@@ -990,7 +990,13 @@ if ($result['error']) {
     jsonResp(['ok' => false, 'msg' => '转发失败: ' . $result['error']]);
 }
 
-$logEntry['status']   = $serverResp['ok'] ?? false ? 'success' : 'task_server_error';
+if ($apiType === 1) {
+    $respCode = is_array($serverResp) ? (string)($serverResp['code'] ?? '') : '';
+    $isForwardSuccess = $respCode === '200' || strcasecmp($respCode, 'SUCCESS') === 0;
+} else {
+    $isForwardSuccess = is_array($serverResp) && !empty($serverResp['ok']);
+}
+$logEntry['status'] = $isForwardSuccess ? 'success' : 'task_server_error';
 $logEntry['response'] = $serverResp ?? $result['response'];
 appendLog($LOG_FILE, $logEntry, $MAX_LOGS);
 
