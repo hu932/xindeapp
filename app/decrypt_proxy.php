@@ -532,15 +532,9 @@ if ($apiType === 2) {
         appendLog($LOG_FILE, $logEntry, $MAX_LOGS);
         jsonResp(['ok' => false, 'msg' => '未提取到response_body对象，接口2不会上传wrapper或转义字符串']);
     }
-    $taskPayload = is_array($taskInfo) ? [
-        'ID' => (string)($taskInfo['ID'] ?? ''),
-        'TaskNumber' => (string)($taskInfo['TaskNumber'] ?? ''),
-        'TaskType' => (string)($taskInfo['TaskType'] ?? ''),
-    ] : $taskInfo;
-
     $payload = [
         '用户名' => $username, '组ID' => $groupId,
-        '任务数据' => $taskPayload, 'data' => $actualData,
+        '任务数据' => $taskInfo, 'data' => $actualData,
     ];
     $logEntry['forward_data_type'] = gettype($payload['data']);
     $logEntry['forward_data_keys'] = is_array($payload['data']) ? array_slice(array_keys($payload['data']), 0, 30) : null;
