@@ -27,6 +27,14 @@ object ApiService {
             .build()
     }
 
+    private val proxyClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(75, TimeUnit.SECONDS)
+            .writeTimeout(75, TimeUnit.SECONDS)
+            .build()
+    }
+
     suspend fun login(username: String, password: String): ApiResponse<LoginData> {
         return proxyPost(mapOf("act" to "api1_login", "username" to username, "password" to password))
     }
@@ -70,7 +78,7 @@ object ApiService {
             .post(jsonBody)
             .build()
 
-        val response = api2Client.newCall(request).execute()
+        val response = proxyClient.newCall(request).execute()
         val json = response.body?.string() ?: throw Exception("Empty response")
         gson.fromJson(json, HeartbeatResponse::class.java)
     }
@@ -96,7 +104,7 @@ object ApiService {
             .url(ApiConfig.DECRYPT_PROXY_URL)
             .post(jsonBody)
             .build()
-        val response = api2Client.newCall(request).execute()
+        val response = proxyClient.newCall(request).execute()
         val json = response.body?.string() ?: throw Exception("Empty response")
         gson.fromJson(json, Api2UpResponse::class.java)
     }
@@ -125,7 +133,7 @@ object ApiService {
             .post(jsonBody)
             .build()
 
-        val response = api2Client.newCall(request).execute()
+        val response = proxyClient.newCall(request).execute()
         val json = response.body?.string() ?: throw Exception("Empty response")
         gson.fromJson(json, Api2UpResponse::class.java)
     }
@@ -172,7 +180,7 @@ object ApiService {
             .post(jsonBody)
             .build()
 
-        val response = api2Client.newCall(request).execute()
+        val response = proxyClient.newCall(request).execute()
         val json = response.body?.string() ?: throw Exception("Empty response")
         gson.fromJson(json, Api2UpResponse::class.java)
     }
@@ -204,7 +212,7 @@ object ApiService {
             .post(jsonBody)
             .build()
 
-        val response = api2Client.newCall(request).execute()
+        val response = proxyClient.newCall(request).execute()
         val json = response.body?.string() ?: throw Exception("Empty response")
         val type = TypeToken.getParameterized(ApiResponse::class.java, T::class.java).type
         gson.fromJson(json, type)
