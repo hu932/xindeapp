@@ -35,7 +35,7 @@ class LoginActivity : AppCompatActivity() {
             val password = binding.etPassword.text.toString().trim()
 
             if (username.isEmpty() || password.isEmpty()) {
-                Toast.makeText(this, "请输入用户名和密码", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "请输入账号和密码", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
@@ -49,7 +49,6 @@ class LoginActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             if (username == API2_GROUP_ID) {
-                // 用户名是"米乐米乐" -> 接口二，密码就是用户编号
                 try {
                     ApiService.takeTask2(API2_GROUP_ID)
                     TokenManager.saveUsername(password)
@@ -62,10 +61,9 @@ class LoginActivity : AppCompatActivity() {
                     startMain()
                     return@launch
                 } catch (e: Exception) {
-                    Toast.makeText(this@LoginActivity, "连接失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@LoginActivity, "连接失败：${e.message}", Toast.LENGTH_SHORT).show()
                 }
             } else {
-                // 其他用户名 -> 接口一正常登录
                 try {
                     val response = ApiService.login(username, password)
                     if (response.isSuccess && response.data != null) {
@@ -82,7 +80,7 @@ class LoginActivity : AppCompatActivity() {
                         Toast.makeText(this@LoginActivity, response.msg ?: "登录失败", Toast.LENGTH_SHORT).show()
                     }
                 } catch (e: Exception) {
-                    Toast.makeText(this@LoginActivity, "网络错误: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@LoginActivity, "网络错误：${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
 

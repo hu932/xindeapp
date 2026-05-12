@@ -91,7 +91,7 @@ data class UpdateResponse(
     @SerializedName("version_code") val versionCode: Int = 0,
     @SerializedName("version_name") val versionName: String = "",
     @SerializedName("apk_url") val apkUrl: String = "",
-    @SerializedName("title") val title: String = "Update available",
+    @SerializedName("title") val title: String = "发现新版本",
     @SerializedName("message") val message: String = "",
     @SerializedName("force") val force: Boolean = false,
     @SerializedName("blocked") val blocked: Boolean = false,

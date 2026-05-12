@@ -159,9 +159,9 @@ public abstract class f {
 
         // 0x105: device names
         ArrayList<String> names = new ArrayList<>();
-        names.add("Fresh Start");names.add("Eureka");names.add("Your New Adventure");names.add("Next Chapter");
-        names.add("New Beginnings");names.add("Hidden Treasures");names.add("Midnight Thoughts");names.add("Bright Horizons");
-        names.add("Silent Echoes");names.add("Breaking Ground");names.add("New Horizons");names.add("Second Chance");
+        names.add("新的开始");names.add("灵光一现");names.add("新的旅程");names.add("下一章节");
+        names.add("全新起点");names.add("隐藏宝藏");names.add("午夜思绪");names.add("明亮远方");
+        names.add("静默回声");names.add("破土新生");names.add("全新视野");names.add("第二机会");
         Collections.shuffle(names);
         ArrayList<String> e105 = new ArrayList<>();
         for (int i2 = 0; i2 < 4; i2++) e105.add("\"" + i2 + "\": \"" + names.get(i2) + "\"");

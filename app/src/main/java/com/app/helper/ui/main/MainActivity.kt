@@ -52,7 +52,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupUI() {
-        binding.tvUsername.text = "User: ${TokenManager.getUsername()}"
+        binding.tvUsername.text = "账号：${TokenManager.getUsername()}"
 
         binding.btnTestApi.setOnClickListener {
             showDelayConfigDialog()
@@ -61,30 +61,30 @@ class MainActivity : AppCompatActivity() {
         binding.btnStartAuto.setOnClickListener {
             if (checkOverlayPermission()) {
                 startTaskService()
-                Toast.makeText(this, "Service started. Use the floating window.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "服务已启动，请使用悬浮窗操作。", Toast.LENGTH_SHORT).show()
             }
         }
 
         binding.btnStopAuto.setOnClickListener {
             stopService(Intent(this, TaskService::class.java))
-            Toast.makeText(this, "Service stopped", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "服务已停止", Toast.LENGTH_SHORT).show()
         }
 
         binding.btnSingleTask.setOnClickListener {
-            Toast.makeText(this, "Use the floating window single-task button.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "请使用悬浮窗的单任务按钮。", Toast.LENGTH_SHORT).show()
         }
 
         binding.btnLogout.setOnClickListener {
             AlertDialog.Builder(this)
-                .setTitle("Logout")
-                .setMessage("Logout now?")
-                .setPositiveButton("OK") { _, _ ->
+                .setTitle("退出登录")
+                .setMessage("确定现在退出登录？")
+                .setPositiveButton("确定") { _, _ ->
                     TokenManager.logout()
                     stopService(Intent(this, TaskService::class.java))
                     startActivity(Intent(this, LoginActivity::class.java))
                     finish()
                 }
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton("取消", null)
                 .show()
         }
 
@@ -121,7 +121,7 @@ class MainActivity : AppCompatActivity() {
                     hasUpdate = true,
                     versionName = intent.getStringExtra("version_name") ?: "",
                     apkUrl = intent.getStringExtra("apk_url") ?: "",
-                    title = intent.getStringExtra("title") ?: "Update available",
+                    title = intent.getStringExtra("title") ?: "发现新版本",
                     message = intent.getStringExtra("message") ?: "",
                     force = intent.getBooleanExtra("force", false),
                     blocked = isBlocked,
@@ -163,15 +163,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showBlockedDialog(update: UpdateResponse) {
-        val msg = update.blockedMsg.ifBlank { "This version is disabled. Please update." }
+        val msg = update.blockedMsg.ifBlank { "当前版本已停用，请更新后继续使用。" }
         val dialog = AlertDialog.Builder(this)
-            .setTitle("Version disabled")
-            .setMessage(msg + if (update.apkUrl.isNotBlank()) "\n\nLatest: ${update.versionName}" else "")
+            .setTitle("版本已停用")
+            .setMessage(msg + if (update.apkUrl.isNotBlank()) "\n\n最新版本：${update.versionName}" else "")
             .apply {
                 if (update.apkUrl.isNotBlank()) {
-                    setPositiveButton("Update", null)
+                    setPositiveButton("更新", null)
                 }
-                setNegativeButton("Exit") { _, _ -> finishAffinity() }
+                setNegativeButton("退出") { _, _ -> finishAffinity() }
             }
             .create()
         dialog.setCanceledOnTouchOutside(false)
@@ -180,8 +180,8 @@ class MainActivity : AppCompatActivity() {
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
                 downloadApk(update.apkUrl, update.versionName)
-                dialog.setMessage("Downloading. Check notification progress.\n\n$msg")
-                dialog.getButton(AlertDialog.BUTTON_POSITIVE).text = "Download again"
+                dialog.setMessage("正在下载，请查看通知栏进度。\n\n$msg")
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).text = "重新下载"
             }
         }
         dialog.show()
@@ -189,19 +189,19 @@ class MainActivity : AppCompatActivity() {
 
     private fun showUpdateDialog(update: UpdateResponse) {
         val msg = buildString {
-            append("Latest: ${update.versionName}")
+            append("最新版本：${update.versionName}")
             if (update.message.isNotBlank()) {
                 append("\n\n")
                 append(update.message)
             }
         }
         val dialog = AlertDialog.Builder(this)
-            .setTitle(update.title.ifBlank { "Update available" })
+            .setTitle(update.title.ifBlank { "发现新版本" })
             .setMessage(msg)
-            .setPositiveButton("Download", null)
+            .setPositiveButton("下载", null)
             .apply {
                 if (!update.force) {
-                    setNegativeButton("Later", null)
+                    setNegativeButton("稍后", null)
                 }
             }
             .create()
@@ -212,8 +212,8 @@ class MainActivity : AppCompatActivity() {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 downloadApk(update.apkUrl, update.versionName)
                 if (update.force) {
-                    dialog.setMessage("Downloading. Check notification progress.\n\n$msg")
-                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).text = "Download again"
+                    dialog.setMessage("正在下载，请查看通知栏进度。\n\n$msg")
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).text = "重新下载"
                 } else {
                     dialog.dismiss()
                 }
@@ -224,10 +224,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun downloadApk(apkUrl: String, versionName: String) {
         try {
-            val fileName = "Gejie-${versionName.ifBlank { "update" }}.apk"
+            val fileName = "格界13-14-${versionName.ifBlank { "更新" }}.apk"
             val request = DownloadManager.Request(Uri.parse(apkUrl))
-                .setTitle("Gejie update")
-                .setDescription("Downloading update")
+                .setTitle("格界13-14 更新")
+                .setDescription("正在下载更新")
                 .setMimeType("application/vnd.android.package-archive")
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
@@ -235,9 +235,9 @@ class MainActivity : AppCompatActivity() {
                 .setAllowedOverRoaming(true)
             val manager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             manager.enqueue(request)
-            Toast.makeText(this, "Download started", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "已开始下载", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
-            Toast.makeText(this, "Download failed: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "下载失败：${e.message}", Toast.LENGTH_LONG).show()
             try {
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl)))
             } catch (_: Exception) {
@@ -257,9 +257,9 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         binding.tvStatus.text = if (TaskService.isRunning) {
-            "Status: service running"
+            "状态：服务运行中"
         } else {
-            "Status: service stopped"
+            "状态：服务已停止"
         }
     }
 
@@ -275,16 +275,16 @@ class MainActivity : AppCompatActivity() {
         etMax.setText(curMax.toString())
 
         AlertDialog.Builder(this)
-            .setTitle("Random delay (seconds)")
+            .setTitle("随机延迟（秒）")
             .setView(view)
-            .setPositiveButton("OK") { _, _ ->
+            .setPositiveButton("确定") { _, _ ->
                 val min = etMin.text.toString().toIntOrNull() ?: 3
                 val max = etMax.text.toString().toIntOrNull() ?: 8
                 prefs.edit()
                     .putInt("delay_min", min.coerceAtLeast(1))
                     .putInt("delay_max", max.coerceAtLeast(min))
                     .apply()
-                Toast.makeText(this, "Delay set: $min-$max seconds", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "延迟已设置：$min-$max 秒", Toast.LENGTH_SHORT).show()
                 if (TaskService.isRunning) {
                     val intent = Intent(this, TaskService::class.java).apply {
                         action = "SET_DELAY"
@@ -294,7 +294,7 @@ class MainActivity : AppCompatActivity() {
                     startService(intent)
                 }
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton("取消", null)
             .show()
     }
 
@@ -310,13 +310,13 @@ class MainActivity : AppCompatActivity() {
     private fun checkOverlayPermission(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
             AlertDialog.Builder(this)
-                .setTitle("Overlay permission required")
-                .setMessage("Grant overlay permission for the floating task window.")
-                .setPositiveButton("Settings") { _, _ ->
+                .setTitle("需要悬浮窗权限")
+                .setMessage("请授予悬浮窗权限，用于显示任务操作窗口。")
+                .setPositiveButton("去设置") { _, _ ->
                     val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
                     startActivity(intent)
                 }
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton("取消", null)
                 .show()
             return false
         }

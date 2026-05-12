@@ -18,7 +18,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Gejie 13-14"
+            android:text="格界13-14"
             android:textColor="#FFFFFF"
             android:textSize="20sp"
             android:textStyle="bold" />
@@ -59,7 +59,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginBottom="8dp"
-                        android:text="Task status"
+                        android:text="任务状态"
                         android:textColor="#333333"
                         android:textSize="16sp"
                         android:textStyle="bold" />
@@ -68,7 +68,7 @@
                         android:id="@+id/tv_status"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Status: idle"
+                        android:text="状态：空闲"
                         android:textColor="#666666"
                         android:textSize="14sp" />
 
@@ -77,7 +77,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
-                        android:text="Current task: none"
+                        android:text="当前任务：无"
                         android:textColor="#666666"
                         android:textSize="14sp" />
 
@@ -92,7 +92,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="Done: 0"
+                            android:text="完成：0"
                             android:textColor="#4CAF50"
                             android:textSize="14sp" />
 
@@ -101,7 +101,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="Failed: 0"
+                            android:text="失败：0"
                             android:textColor="#F44336"
                             android:textSize="14sp" />
                     </LinearLayout>
@@ -111,7 +111,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
-                        android:text="Target app version: unknown"
+                        android:text="目标应用版本：未知"
                         android:textColor="#777777"
                         android:textSize="12sp" />
                 </LinearLayout>
@@ -134,7 +134,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginBottom="8dp"
-                        android:text="Task control"
+                        android:text="任务控制"
                         android:textColor="#333333"
                         android:textSize="16sp"
                         android:textStyle="bold" />
@@ -150,7 +150,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginEnd="4dp"
                             android:layout_weight="1"
-                            android:text="Start"
+                            android:text="开始"
                             android:textSize="13sp" />
 
                         <com.google.android.material.button.MaterialButton
@@ -160,7 +160,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginStart="4dp"
                             android:layout_weight="1"
-                            android:text="Stop"
+                            android:text="停止"
                             android:textSize="13sp" />
                     </LinearLayout>
 
@@ -177,7 +177,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginEnd="4dp"
                             android:layout_weight="1"
-                            android:text="Single task"
+                            android:text="单任务"
                             android:textSize="13sp" />
 
                         <com.google.android.material.button.MaterialButton
@@ -187,7 +187,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginStart="4dp"
                             android:layout_weight="1"
-                            android:text="Delay"
+                            android:text="延迟"
                             android:textSize="13sp" />
                     </LinearLayout>
                 </LinearLayout>
@@ -217,7 +217,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="Runtime log"
+                            android:text="运行日志"
                             android:textColor="#333333"
                             android:textSize="16sp"
                             android:textStyle="bold" />
@@ -227,7 +227,7 @@
                             style="@style/Widget.MaterialComponents.Button.TextButton"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Clear"
+                            android:text="清空"
                             android:textSize="12sp" />
                     </LinearLayout>
 
@@ -254,7 +254,7 @@
                 style="@style/Widget.MaterialComponents.Button.TextButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Logout"
+                android:text="退出登录"
                 android:textColor="#F44336"
                 android:textSize="14sp" />
 
