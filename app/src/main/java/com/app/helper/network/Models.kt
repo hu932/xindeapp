@@ -72,11 +72,17 @@ data class Api2TaskInfo(
 data class Api2UpResponse(
     @SerializedName("ok") val ok: Boolean = false,
     @SerializedName("code") val code: String = "",
-    @SerializedName("msg") val msg: String? = null
+    @SerializedName("msg") val msg: String? = null,
+    @SerializedName("data") val data: Api1SubmitData? = null
 ) {
-    val isApi1Success: Boolean get() = code == "200" || code.equals("SUCCESS", ignoreCase = true)
+    val isApi1Success: Boolean get() = code == "200" && data?.code == "SUCCESS" && data.msg == null
     val isApi2Success: Boolean get() = ok
 }
+
+data class Api1SubmitData(
+    @SerializedName("code") val code: String = "",
+    @SerializedName("msg") val msg: String? = null
+)
 
 data class HeartbeatResponse(
     @SerializedName("ok") val ok: Boolean = false,
