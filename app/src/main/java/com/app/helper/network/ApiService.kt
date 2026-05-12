@@ -1,10 +1,7 @@
 package com.app.helper.network
 
-import com.app.helper.App
-import com.app.helper.util.FingerprintManager
 import com.app.helper.util.TokenManager
 import com.google.gson.Gson
-import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -16,7 +13,6 @@ import java.io.ByteArrayOutputStream
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPOutputStream
-import org.json.JSONObject
 
 object ApiService {
 
@@ -30,7 +26,6 @@ object ApiService {
             .build()
     }
 
-    // ===== 接口一 =====
     suspend fun login(username: String, password: String): ApiResponse<LoginData> {
         return proxyPost(mapOf("act" to "api1_login", "username" to username, "password" to password))
     }
@@ -65,7 +60,6 @@ object ApiService {
         body["group_id"] = groupId
         body["api_type"] = apiType
         body["device_id"] = deviceId
-        addFingerprintFields(body)
 
         val jsonBody = gson.toJson(body)
             .toRequestBody("application/json; charset=utf-8".toMediaType())
@@ -78,24 +72,6 @@ object ApiService {
         val response = api2Client.newCall(request).execute()
         val json = response.body?.string() ?: throw Exception("Empty response")
         gson.fromJson(json, HeartbeatResponse::class.java)
-    }
-
-    suspend fun reportFingerprintEvent(event: String, fpName: String, fpJson: String) = withContext(Dispatchers.IO) {
-        val body = HashMap<String, Any>()
-        body["act"] = "fingerprint_event"
-        body["event"] = event
-        body["username"] = TokenManager.getUsername()
-        body["group_id"] = TokenManager.getGroupId()
-        body["api_type"] = TokenManager.getApiType()
-        addFingerprintFields(body, fpName, fpJson)
-
-        val jsonBody = gson.toJson(body)
-            .toRequestBody("application/json; charset=utf-8".toMediaType())
-        val request = Request.Builder()
-            .url(ApiConfig.DECRYPT_PROXY_URL)
-            .post(jsonBody)
-            .build()
-        api2Client.newCall(request).execute().close()
     }
 
     suspend fun submitTask(
@@ -113,7 +89,6 @@ object ApiService {
         body["group_id"] = groupId
         body["device_id"] = deviceId
         body["auth_token"] = TokenManager.getToken()
-        addFingerprintFields(body)
 
         val jsonBody = gson.toJson(body)
             .toRequestBody("application/json; charset=utf-8".toMediaType())
@@ -128,9 +103,8 @@ object ApiService {
         gson.fromJson(json, Api2UpResponse::class.java)
     }
 
-    // ===== 接口二 =====
     suspend fun takeTask2(groupId: String): Api2TaskResponse = withContext(Dispatchers.IO) {
-        val body = mapOf("info" to "台湾", "use" to groupId)
+        val body = mapOf("info" to "TW", "use" to groupId)
         val jsonBytes = gson.toJson(body).toByteArray(Charsets.UTF_8)
         val gzipped = gzipCompress(jsonBytes)
 
@@ -157,11 +131,10 @@ object ApiService {
         body["username"] = username
         body["group_id"] = groupId
         body["device_id"] = deviceId
-        addFingerprintFields(body)
-        body["用户名"] = username
-        body["组ID"] = groupId
-        body["设备ID"] = deviceId
-        body["任务数据"] = taskInfo
+        body["username_text"] = username
+        body["group_id_text"] = groupId
+        body["device_id_text"] = deviceId
+        body["task_info"] = taskInfo
         body["data"] = encryptedData
 
         val jsonBody = gson.toJson(body)
@@ -183,61 +156,10 @@ object ApiService {
         return bos.toByteArray()
     }
 
-    private fun addFingerprintFields(body: MutableMap<String, Any>) {
-        try {
-            val context = App.context
-            val activeName = FingerprintManager.getActiveFpName(context).orEmpty()
-            val raw = FingerprintManager.loadCurrentFp(context)
-            addFingerprintFields(body, activeName, raw)
-        } catch (e: Exception) {
-            // Fingerprint stats should never block task submission.
-        }
-    }
-
-    private fun addFingerprintFields(body: MutableMap<String, Any>, sourceName: String, sourceRaw: String?) {
-        try {
-            val raw = sourceRaw
-            var fpName = sourceName
-            var fpId = ""
-
-            if (!raw.isNullOrEmpty()) {
-                val json = JSONObject(raw)
-                fpId = json.optString("androidId", "")
-                if (fpName.isBlank()) fpName = json.optString("name", "")
-            }
-
-            if (fpName.isNotBlank()) body["fingerprint_name"] = fpName
-            if (fpId.isNotBlank()) body["fingerprint_id"] = fpId
-            body["fingerprint_key"] = when {
-                fpId.isNotBlank() -> fpId
-                fpName.isNotBlank() -> fpName
-                else -> body["device_id"]?.toString().orEmpty()
-            }
-        } catch (e: Exception) {
-            // Fingerprint stats should never block task submission.
-        }
-    }
-
-    // ===== 接口一通用方法 =====
     private suspend inline fun <reified T> get(path: String): ApiResponse<T> = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url(ApiConfig.BASE_URL + path)
             .get()
-            .build()
-
-        val response = HttpClient.client.newCall(request).execute()
-        val json = response.body?.string() ?: throw Exception("Empty response")
-        val type = TypeToken.getParameterized(ApiResponse::class.java, T::class.java).type
-        gson.fromJson(json, type)
-    }
-
-    private suspend inline fun <reified T> post(path: String, body: Any): ApiResponse<T> = withContext(Dispatchers.IO) {
-        val jsonBody = gson.toJson(body)
-            .toRequestBody("application/json; charset=utf-8".toMediaType())
-
-        val request = Request.Builder()
-            .url(ApiConfig.BASE_URL + path)
-            .post(jsonBody)
             .build()
 
         val response = HttpClient.client.newCall(request).execute()

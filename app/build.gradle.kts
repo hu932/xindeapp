@@ -8,10 +8,10 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.spotify.music"
+        applicationId = "com.yh.csyxgl.vivo"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
+        versionCode = 3
         versionName = "1.1.0"
     }
 

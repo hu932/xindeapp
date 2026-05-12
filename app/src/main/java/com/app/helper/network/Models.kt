@@ -42,7 +42,6 @@ data class SubmitResult(
     val isSuccess: Boolean get() = code == "SUCCESS"
 }
 
-// ===== 接口二数据模型 =====
 data class Api2TaskResponse(
     @SerializedName("ok") val ok: Boolean = false,
     @SerializedName("msg") val msg: String? = null,
@@ -57,6 +56,7 @@ data class Api2TaskData(
         val parts = url.trimEnd('/').split("/")
         return if (parts.size >= 2) parts[parts.size - 2].toLongOrNull() ?: 0 else 0
     }
+
     fun parseItemId(): Long {
         val parts = url.trimEnd('/').split("/")
         return parts.lastOrNull()?.toLongOrNull() ?: 0
@@ -91,7 +91,7 @@ data class UpdateResponse(
     @SerializedName("version_code") val versionCode: Int = 0,
     @SerializedName("version_name") val versionName: String = "",
     @SerializedName("apk_url") val apkUrl: String = "",
-    @SerializedName("title") val title: String = "发现新版本",
+    @SerializedName("title") val title: String = "Update available",
     @SerializedName("message") val message: String = "",
     @SerializedName("force") val force: Boolean = false,
     @SerializedName("blocked") val blocked: Boolean = false,
