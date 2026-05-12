@@ -52,11 +52,5 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
-        <provider
-            android:name=".service.FingerprintProvider"
-            android:authorities="com.yh.csyxgl.vivo.provider"
-            android:exported="true"
-            android:grantUriPermissions="true" />
-
     </application>
 </manifest>
