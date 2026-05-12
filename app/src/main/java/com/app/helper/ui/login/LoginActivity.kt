@@ -13,10 +13,6 @@ import kotlinx.coroutines.launch
 
 class LoginActivity : AppCompatActivity() {
 
-    companion object {
-        private const val API2_GROUP_ID = "米乐米乐"
-    }
-
     private lateinit var binding: ActivityLoginBinding
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -48,40 +44,41 @@ class LoginActivity : AppCompatActivity() {
         binding.btnLogin.text = "登录中..."
 
         lifecycleScope.launch {
-            if (username == API2_GROUP_ID) {
-                try {
-                    ApiService.takeTask2(API2_GROUP_ID)
+            try {
+                val api2Response = ApiService.loginApi2(username, password)
+                if (api2Response.isSuccess && api2Response.data != null) {
+                    val groupId = api2Response.data.groupId.ifBlank { username }
+                    ApiService.takeTask2(groupId)
                     TokenManager.saveUsername(password)
-                    TokenManager.saveGroupId(API2_GROUP_ID)
+                    TokenManager.saveGroupId(groupId)
                     TokenManager.saveApiType(TokenManager.API_TYPE_2)
-                    TokenManager.saveToken("api2_$password")
+                    TokenManager.saveToken(api2Response.data.token.ifBlank { "api2_$password" })
                     getSharedPreferences("task_config", MODE_PRIVATE)
                         .edit().putString("saved_password", password).apply()
                     Toast.makeText(this@LoginActivity, "登录成功", Toast.LENGTH_SHORT).show()
                     startMain()
                     return@launch
-                } catch (e: Exception) {
-                    Toast.makeText(this@LoginActivity, "连接失败：${e.message}", Toast.LENGTH_SHORT).show()
                 }
-            } else {
-                try {
-                    val response = ApiService.login(username, password)
-                    if (response.isSuccess && response.data != null) {
-                        TokenManager.saveToken(response.data.token)
-                        TokenManager.saveUsername(username)
-                        TokenManager.saveUserLevel(response.data.userLevel)
-                        TokenManager.saveApiType(TokenManager.API_TYPE_1)
-                        getSharedPreferences("task_config", MODE_PRIVATE)
-                            .edit().putString("saved_password", password).apply()
-                        Toast.makeText(this@LoginActivity, "登录成功", Toast.LENGTH_SHORT).show()
-                        startMain()
-                        return@launch
-                    } else {
-                        Toast.makeText(this@LoginActivity, response.msg ?: "登录失败", Toast.LENGTH_SHORT).show()
-                    }
-                } catch (e: Exception) {
-                    Toast.makeText(this@LoginActivity, "网络错误：${e.message}", Toast.LENGTH_SHORT).show()
+            } catch (_: Exception) {
+            }
+
+            try {
+                val response = ApiService.login(username, password)
+                if (response.isSuccess && response.data != null) {
+                    TokenManager.saveToken(response.data.token)
+                    TokenManager.saveUsername(username)
+                    TokenManager.saveUserLevel(response.data.userLevel)
+                    TokenManager.saveApiType(TokenManager.API_TYPE_1)
+                    getSharedPreferences("task_config", MODE_PRIVATE)
+                        .edit().putString("saved_password", password).apply()
+                    Toast.makeText(this@LoginActivity, "登录成功", Toast.LENGTH_SHORT).show()
+                    startMain()
+                    return@launch
+                } else {
+                    Toast.makeText(this@LoginActivity, response.msg ?: "登录失败", Toast.LENGTH_SHORT).show()
                 }
+            } catch (e: Exception) {
+                Toast.makeText(this@LoginActivity, "网络错误：${e.message}", Toast.LENGTH_SHORT).show()
             }
 
             binding.btnLogin.isEnabled = true

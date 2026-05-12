@@ -38,6 +38,10 @@ object ApiService {
         return proxyPost(mapOf("act" to "api1_login", "username" to username, "password" to password))
     }
 
+    suspend fun loginApi2(username: String, password: String): ApiResponse<LoginData> {
+        return proxyPost(mapOf("act" to "api2_login", "username" to username, "password" to password))
+    }
+
     suspend fun takeTask(): ApiResponse<TaskData> {
         return get(ApiConfig.TASK_TAKE_PATH)
     }

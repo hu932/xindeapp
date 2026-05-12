@@ -13,7 +13,8 @@ data class ApiResponse<T>(
 
 data class LoginData(
     @SerializedName("token") val token: String = "",
-    @SerializedName("userLevel") val userLevel: Int = 0
+    @SerializedName("userLevel") val userLevel: Int = 0,
+    @SerializedName("groupId") val groupId: String = ""
 )
 
 data class TaskData(
