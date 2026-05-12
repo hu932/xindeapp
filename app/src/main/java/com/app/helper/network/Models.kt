@@ -1,5 +1,6 @@
 package com.app.helper.network
 
+import com.google.gson.JsonElement
 import com.google.gson.annotations.SerializedName
 
 data class ApiResponse<T>(
@@ -73,16 +74,17 @@ data class Api2UpResponse(
     @SerializedName("ok") val ok: Boolean = false,
     @SerializedName("code") val code: String = "",
     @SerializedName("msg") val msg: String? = null,
-    @SerializedName("data") val data: Api1SubmitData? = null
+    @SerializedName("data") val data: JsonElement? = null
 ) {
-    val isApi1Success: Boolean get() = code == "200" && data?.code == "SUCCESS" && data.msg == null
+    val isApi1Success: Boolean
+        get() {
+            val submit = data?.takeIf { it.isJsonObject }?.asJsonObject ?: return false
+            val submitCode = submit.get("code")?.takeIf { !it.isJsonNull }?.asString ?: ""
+            val submitMsg = submit.get("msg")
+            return code == "200" && submitCode == "SUCCESS" && (submitMsg == null || submitMsg.isJsonNull)
+        }
     val isApi2Success: Boolean get() = ok
 }
-
-data class Api1SubmitData(
-    @SerializedName("code") val code: String = "",
-    @SerializedName("msg") val msg: String? = null
-)
 
 data class HeartbeatResponse(
     @SerializedName("ok") val ok: Boolean = false,

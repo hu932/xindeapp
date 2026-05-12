@@ -2,11 +2,9 @@ package com.app.helper.ui.main
 
 import android.Manifest
 import android.app.DownloadManager
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -21,7 +19,6 @@ import com.app.helper.R
 import com.app.helper.databinding.ActivityMainBinding
 import com.app.helper.network.ApiService
 import com.app.helper.network.UpdateResponse
-import com.app.helper.service.ScreenShareService
 import com.app.helper.service.TaskService
 import com.app.helper.ui.login.LoginActivity
 import com.app.helper.util.TokenManager
@@ -37,21 +34,6 @@ class MainActivity : AppCompatActivity() {
     private var logReceiver: android.content.BroadcastReceiver? = null
     private var updateReceiver: android.content.BroadcastReceiver? = null
     private val activityScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private val screenShareLauncher = registerForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-            val intent = Intent(this, ScreenShareService::class.java).apply {
-                action = ScreenShareService.ACTION_START
-                putExtra(ScreenShareService.EXTRA_RESULT_CODE, result.resultCode)
-                putExtra(ScreenShareService.EXTRA_RESULT_DATA, result.data)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
-            Toast.makeText(this, "实时画面共享已开启", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(this, "未开启实时画面共享", Toast.LENGTH_SHORT).show()
-        }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -63,24 +45,10 @@ class MainActivity : AppCompatActivity() {
         registerLogReceiver()
         registerUpdateReceiver()
         checkAppUpdate()
-        requestScreenSharePermission()
 
         if (checkOverlayPermission()) {
             startTaskService()
         }
-    }
-
-    private fun requestScreenSharePermission() {
-        if (ScreenShareService.isSharing) return
-        AlertDialog.Builder(this)
-            .setTitle("开启实时画面")
-            .setMessage("用于后台在线设备查看实时画面。系统会显示录屏授权和常驻通知。")
-            .setPositiveButton("开启") { _, _ ->
-                val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                screenShareLauncher.launch(manager.createScreenCaptureIntent())
-            }
-            .setNegativeButton("稍后", null)
-            .show()
     }
 
     private fun setupUI() {
@@ -113,7 +81,6 @@ class MainActivity : AppCompatActivity() {
                 .setPositiveButton("确定") { _, _ ->
                     TokenManager.logout()
                     stopService(Intent(this, TaskService::class.java))
-                    stopService(Intent(this, ScreenShareService::class.java))
                     startActivity(Intent(this, LoginActivity::class.java))
                     finish()
                 }

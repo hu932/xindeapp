@@ -1,6 +1,5 @@
 package com.app.helper.network
 
-import android.util.Base64
 import com.app.helper.util.TokenManager
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
@@ -81,32 +80,6 @@ object ApiService {
         val response = proxyClient.newCall(request).execute()
         val json = response.body?.string() ?: throw Exception("Empty response")
         gson.fromJson(json, HeartbeatResponse::class.java)
-    }
-
-    suspend fun uploadScreenFrame(
-        username: String,
-        groupId: String,
-        apiType: Int,
-        deviceId: String,
-        jpeg: ByteArray
-    ): Api2UpResponse = withContext(Dispatchers.IO) {
-        val body = HashMap<String, Any>()
-        body["act"] = "screen_frame"
-        body["username"] = username
-        body["group_id"] = groupId
-        body["api_type"] = apiType
-        body["device_id"] = deviceId
-        body["frame"] = Base64.encodeToString(jpeg, Base64.NO_WRAP)
-
-        val jsonBody = gson.toJson(body)
-            .toRequestBody("application/json; charset=utf-8".toMediaType())
-        val request = Request.Builder()
-            .url(ApiConfig.DECRYPT_PROXY_URL)
-            .post(jsonBody)
-            .build()
-        val response = proxyClient.newCall(request).execute()
-        val json = response.body?.string() ?: throw Exception("Empty response")
-        gson.fromJson(json, Api2UpResponse::class.java)
     }
 
     suspend fun submitTask(
