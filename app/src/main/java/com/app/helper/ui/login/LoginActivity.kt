@@ -48,7 +48,6 @@ class LoginActivity : AppCompatActivity() {
                 val api2Response = ApiService.loginApi2(username, password)
                 if (api2Response.isSuccess && api2Response.data != null) {
                     val groupId = api2Response.data.groupId.ifBlank { username }
-                    ApiService.takeTask2(groupId)
                     TokenManager.saveUsername(password)
                     TokenManager.saveGroupId(groupId)
                     TokenManager.saveApiType(TokenManager.API_TYPE_2)
