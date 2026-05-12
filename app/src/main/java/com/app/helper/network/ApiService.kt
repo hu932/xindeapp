@@ -139,7 +139,7 @@ object ApiService {
     }
 
     suspend fun takeTask2(groupId: String): Api2TaskResponse = withContext(Dispatchers.IO) {
-        val body = mapOf("info" to "TW", "use" to groupId)
+        val body = mapOf("info" to "台湾", "use" to groupId)
         val jsonBytes = gson.toJson(body).toByteArray(Charsets.UTF_8)
         val gzipped = gzipCompress(jsonBytes)
 
@@ -166,10 +166,10 @@ object ApiService {
         body["username"] = username
         body["group_id"] = groupId
         body["device_id"] = deviceId
-        body["username_text"] = username
-        body["group_id_text"] = groupId
-        body["device_id_text"] = deviceId
-        body["task_info"] = taskInfo
+        body["用户名"] = username
+        body["组ID"] = groupId
+        body["设备ID"] = deviceId
+        body["任务数据"] = taskInfo
         body["data"] = encryptedData
 
         val jsonBody = gson.toJson(body)
