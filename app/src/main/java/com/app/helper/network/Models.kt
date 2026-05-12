@@ -71,7 +71,7 @@ data class Api2TaskInfo(
 )
 
 data class Api2UpResponse(
-    @SerializedName("ok") val ok: Boolean = false,
+    @SerializedName("ok") val ok: JsonElement? = null,
     @SerializedName("code") val code: String = "",
     @SerializedName("msg") val msg: String? = null,
     @SerializedName("data") val data: JsonElement? = null
@@ -83,7 +83,22 @@ data class Api2UpResponse(
             val submitMsg = submit.get("msg")
             return code == "200" && submitCode == "SUCCESS" && (submitMsg == null || submitMsg.isJsonNull)
         }
-    val isApi2Success: Boolean get() = ok
+    val isApi2Success: Boolean
+        get() {
+            val okValue = ok
+            if (okValue != null && !okValue.isJsonNull) {
+                if (okValue.isJsonPrimitive) {
+                    val primitive = okValue.asJsonPrimitive
+                    if (primitive.isBoolean && primitive.asBoolean) return true
+                    if (primitive.isNumber && primitive.asInt == 1) return true
+                    if (primitive.isString) {
+                        val text = primitive.asString.trim()
+                        if (text.equals("true", ignoreCase = true) || text == "1" || text.equals("SUCCESS", ignoreCase = true)) return true
+                    }
+                }
+            }
+            return code.equals("SUCCESS", ignoreCase = true) || code == "200"
+        }
 }
 
 data class HeartbeatResponse(
