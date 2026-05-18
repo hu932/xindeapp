@@ -1531,49 +1531,28 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 .side-pet::before{content:'';position:absolute;left:10px;right:10px;bottom:-54px;height:230px;background:radial-gradient(ellipse at 50% 45%,rgba(59,130,246,.18),rgba(30,64,175,.08) 42%,transparent 70%);filter:blur(1px);opacity:.9;transition:opacity .25s}
 .side-pet::after{content:'';position:absolute;left:28px;right:28px;bottom:16px;height:1px;background:linear-gradient(90deg,transparent,rgba(148,163,184,.35),transparent)}
 .side-pet:hover::before{opacity:1;background:radial-gradient(ellipse at 50% 45%,rgba(59,130,246,.28),rgba(220,38,38,.12) 44%,transparent 72%)}
-.pet-hit{position:absolute;left:50%;bottom:18px;width:190px;height:230px;transform:translateX(-50%);pointer-events:auto;cursor:pointer}
-.pet-time{position:absolute;left:50%;bottom:218px;min-width:142px;padding:5px 10px;border-radius:999px;background:rgba(15,23,42,.72);border:1px solid rgba(147,197,253,.22);box-shadow:0 8px 24px rgba(15,23,42,.22);color:#dbeafe;font-size:11px;font-weight:700;text-align:center;letter-spacing:.2px;transform:translateX(calc(-50% + var(--pet-x))) translateY(var(--pet-y));opacity:.88;white-space:nowrap;transition:transform .14s ease-out,opacity .2s ease}
+.pet-hit{position:absolute;left:50%;bottom:18px;width:210px;height:300px;transform:translateX(-50%);pointer-events:auto;cursor:pointer}
+.pet-time{position:absolute;left:50%;bottom:298px;min-width:142px;padding:5px 10px;border-radius:999px;background:rgba(15,23,42,.72);border:1px solid rgba(147,197,253,.22);box-shadow:0 8px 24px rgba(15,23,42,.22);color:#dbeafe;font-size:11px;font-weight:700;text-align:center;letter-spacing:.2px;transform:translateX(calc(-50% + var(--pet-x))) translateY(var(--pet-y));opacity:.88;white-space:nowrap;transition:transform .14s ease-out,opacity .2s ease}
 .side-pet:hover .pet-time{opacity:1}
 .side-pet.is-launching .pet-time{animation:petTimeLaunch 3.6s cubic-bezier(.2,.8,.18,1) forwards}
-.pet-stage{position:absolute;left:50%;bottom:38px;width:142px;height:168px;transform:translateX(calc(-50% + var(--pet-x))) translateY(var(--pet-y)) rotate(var(--pet-tilt));animation:petFloat 2.8s ease-in-out infinite;transition:transform .14s ease-out,filter .2s ease;will-change:transform}
+.pet-stage{position:absolute;left:50%;bottom:24px;width:192px;height:268px;transform:translateX(calc(-50% + var(--pet-x))) translateY(var(--pet-y)) rotate(var(--pet-tilt));animation:petFloat 2.8s ease-in-out infinite;transition:transform .14s ease-out,filter .2s ease;will-change:transform}
 .side-pet:hover .pet-stage{filter:drop-shadow(0 16px 24px rgba(37,99,235,.22))}
 .side-pet.is-launching .pet-stage{animation:petLaunch 3.6s cubic-bezier(.24,.78,.16,1) forwards}
 .side-pet.is-launching .pet-shadow{animation:petLaunchShadow 3.6s ease forwards}
-.pet-shadow{position:absolute;left:50%;bottom:24px;width:100px;height:18px;border-radius:50%;background:rgba(0,0,0,.34);filter:blur(4px);transform:translateX(calc(-50% + var(--pet-x)));animation:petShadow 2.8s ease-in-out infinite;transition:transform .14s ease-out}
-.cap-head{position:absolute;left:43px;top:10px;width:56px;height:58px;border-radius:20px 20px 18px 18px;background:linear-gradient(180deg,#2563eb,#1d4ed8);box-shadow:inset 0 0 0 3px rgba(255,255,255,.08),0 8px 20px rgba(37,99,235,.3)}
-.cap-head::before{content:'J';position:absolute;top:5px;left:0;right:0;text-align:center;color:#fff;font-size:19px;font-weight:900;text-shadow:0 1px 2px rgba(0,0,0,.3)}
-.cap-head::after{content:'';position:absolute;left:13px;right:13px;bottom:6px;height:22px;border-radius:0 0 16px 16px;background:#f2c9a8}
-.cap-wing{position:absolute;top:26px;width:18px;height:10px;background:#e2e8f0;clip-path:polygon(0 50%,100% 0,82% 50%,100% 100%);filter:drop-shadow(0 1px 1px rgba(0,0,0,.25))}
-.cap-wing.left{left:25px;transform:scaleX(-1)}
-.cap-wing.right{right:25px}
-.cap-eye{position:absolute;top:39px;width:5px;height:5px;border-radius:50%;background:#0f172a;z-index:2;animation:petBlink 4s infinite}
-.cap-eye.left{left:59px}.cap-eye.right{right:59px}
-.cap-body{position:absolute;left:35px;top:64px;width:72px;height:82px;border-radius:24px 24px 18px 18px;background:linear-gradient(180deg,#1e40af 0%,#1d4ed8 48%,#b91c1c 49%,#dc2626 100%);box-shadow:inset 0 0 0 3px rgba(255,255,255,.08)}
-.cap-body::before{content:'';position:absolute;left:30px;top:8px;width:12px;height:70px;background:rgba(255,255,255,.88);border-radius:8px;box-shadow:-20px 36px 0 rgba(255,255,255,.88),20px 36px 0 rgba(255,255,255,.88)}
-.cap-body::after{content:'★';position:absolute;top:14px;left:0;right:0;text-align:center;color:#fff;font-size:23px;text-shadow:0 2px 4px rgba(0,0,0,.25)}
-.cap-arm{position:absolute;top:74px;width:22px;height:58px;border-radius:16px;background:#1d4ed8;transform-origin:top center}
-.cap-arm.left{left:22px;transform:rotate(18deg)}
-.cap-arm.right{right:22px;transform:rotate(-18deg);animation:petWave 2.4s ease-in-out infinite}
-.side-pet:hover .cap-arm.right{animation:petGuard .9s ease-in-out infinite}
-.cap-leg{position:absolute;bottom:0;width:24px;height:34px;border-radius:0 0 12px 12px;background:#1e293b}
-.cap-leg.left{left:44px}.cap-leg.right{right:44px}
-.cap-leg::after{content:'';position:absolute;left:50%;top:30px;width:18px;height:0;border-radius:999px;background:linear-gradient(180deg,#fef3c7 0%,#f97316 45%,rgba(239,68,68,0) 100%);filter:blur(.5px);opacity:0;transform:translateX(-50%);transform-origin:top center}
-.side-pet.is-launching .cap-leg::after{height:84px;opacity:.95;animation:rocketFlame .16s ease-in-out infinite alternate}
-.cap-shield{position:absolute;right:6px;top:82px;width:52px;height:52px;border-radius:50%;background:radial-gradient(circle,#2563eb 0 18%,#fff 19% 31%,#dc2626 32% 50%,#fff 51% 64%,#dc2626 65%);box-shadow:0 10px 22px rgba(220,38,38,.28),inset 0 0 0 2px rgba(255,255,255,.65);animation:shieldSpin 5s linear infinite;transition:transform .18s ease,box-shadow .18s ease}
-.cap-shield::before{content:'★';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;text-shadow:0 1px 2px rgba(0,0,0,.28)}
-.side-pet:hover .cap-shield{transform:translate(10px,-6px) scale(1.12);box-shadow:0 0 0 5px rgba(59,130,246,.12),0 14px 26px rgba(220,38,38,.32),inset 0 0 0 2px rgba(255,255,255,.7)}
+.pet-shadow{position:absolute;left:50%;bottom:24px;width:120px;height:18px;border-radius:50%;background:rgba(0,0,0,.34);filter:blur(4px);transform:translateX(calc(-50% + var(--pet-x)));animation:petShadow 2.8s ease-in-out infinite;transition:transform .14s ease-out}
+.pet-anim{position:absolute;inset:0;background-image:url('pet_frames/pet_sprite.png');background-repeat:no-repeat;background-size:600% 100%;background-position:0 0;image-rendering:auto;animation:petFrames 1.4s steps(1) infinite;filter:drop-shadow(0 6px 12px rgba(15,23,42,.35))}
+.side-pet:hover .pet-anim{animation-duration:.7s}
+.pet-launch-flame{position:absolute;left:50%;bottom:-4px;width:30px;height:0;border-radius:999px;background:linear-gradient(180deg,#fef3c7 0%,#f97316 45%,rgba(239,68,68,0) 100%);filter:blur(.5px);opacity:0;transform:translateX(-50%);transform-origin:top center}
+.side-pet.is-launching .pet-launch-flame{height:96px;opacity:.95;animation:rocketFlame .16s ease-in-out infinite alternate}
 .pet-pulse{position:absolute;width:18px;height:18px;border:2px solid rgba(147,197,253,.9);border-radius:50%;pointer-events:none;transform:translate(-50%,-50%);animation:petPulse .62s ease-out forwards}
 .rocket-trail{position:absolute;left:50%;bottom:86px;width:4px;height:0;border-radius:999px;background:linear-gradient(180deg,rgba(96,165,250,0),rgba(96,165,250,.85),rgba(248,113,113,.12));box-shadow:0 0 22px rgba(59,130,246,.42);transform:translateX(-50%);pointer-events:none;opacity:0}
 .side-pet.is-launching .rocket-trail{animation:rocketTrail 2.05s ease-out forwards}
-.pet-spark{position:absolute;width:4px;height:4px;border-radius:50%;background:#bfdbfe;box-shadow:0 0 10px #60a5fa;opacity:.75;animation:petSpark 3.5s ease-in-out infinite}
-.pet-spark.s1{left:28px;top:58px}.pet-spark.s2{right:32px;top:32px;animation-delay:1s}.pet-spark.s3{left:92px;top:122px;animation-delay:2s}
+.pet-spark{position:absolute;width:4px;height:4px;border-radius:50%;background:#bfdbfe;box-shadow:0 0 10px #60a5fa;opacity:.75;animation:petSpark 3.5s ease-in-out infinite;z-index:2}
+.pet-spark.s1{left:24px;top:64px}.pet-spark.s2{right:30px;top:30px;animation-delay:1s}.pet-spark.s3{left:140px;top:160px;animation-delay:2s}
 @keyframes petAura{to{transform:rotate(360deg)}}
 @keyframes petFloat{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(-10px)}}
 @keyframes petShadow{0%,100%{transform:translateX(-50%) scale(1);opacity:.45}50%{transform:translateX(-50%) scale(.82);opacity:.26}}
-@keyframes petBlink{0%,92%,100%{transform:scaleY(1)}95%{transform:scaleY(.15)}}
-@keyframes petWave{0%,100%{transform:rotate(-18deg)}50%{transform:rotate(-36deg)}}
-@keyframes petGuard{0%,100%{transform:rotate(-30deg)}50%{transform:rotate(-44deg)}}
-@keyframes shieldSpin{0%,78%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+@keyframes petFrames{0%{background-position:0% 0}16.66%{background-position:20% 0}33.33%{background-position:40% 0}50%{background-position:60% 0}66.66%{background-position:80% 0}83.33%{background-position:100% 0}100%{background-position:100% 0}}
 @keyframes petSpark{0%,100%{transform:translateY(0) scale(.7);opacity:.25}45%{transform:translateY(-18px) scale(1.15);opacity:.95}}
 @keyframes petPulse{0%{width:18px;height:18px;opacity:.95}100%{width:132px;height:132px;opacity:0}}
 @keyframes petLaunch{0%{opacity:1;transform:translateX(calc(-50% + var(--pet-x))) translateY(var(--pet-y)) rotate(var(--pet-tilt)) scale(1)}10%{transform:translateX(calc(-50% + var(--pet-x))) translateY(16px) rotate(0deg) scale(.96)}66%{opacity:1;transform:translateX(calc(-50% + var(--pet-x))) translateY(calc(-1 * var(--pet-rise, 720px))) rotate(2deg) scale(.9)}69%{opacity:0;transform:translateX(calc(-50% + var(--pet-x))) translateY(calc(-1 * var(--pet-rise, 760px))) scale(.84)}76%{opacity:0;transform:translateX(calc(-50% + var(--pet-x))) translateY(260px) scale(.9)}86%{opacity:1;transform:translateX(calc(-50% + var(--pet-x))) translateY(42px) rotate(-2deg) scale(1.02)}94%{transform:translateX(calc(-50% + var(--pet-x))) translateY(-8px) rotate(1deg) scale(1)}100%{opacity:1;transform:translateX(calc(-50% + var(--pet-x))) translateY(var(--pet-y)) rotate(var(--pet-tilt)) scale(1)}}
@@ -1715,17 +1694,7 @@ pre.resp{background:#f8fafc;padding:12px 14px;border-radius:8px;font-size:12px;o
                 <div class="pet-spark s1"></div>
                 <div class="pet-spark s2"></div>
                 <div class="pet-spark s3"></div>
-                <div class="cap-wing left"></div>
-                <div class="cap-wing right"></div>
-                <div class="cap-head"></div>
-                <div class="cap-eye left"></div>
-                <div class="cap-eye right"></div>
-                <div class="cap-body"></div>
-                <div class="cap-arm left"></div>
-                <div class="cap-arm right"></div>
-                <div class="cap-leg left"></div>
-                <div class="cap-leg right"></div>
-                <div class="cap-shield"></div>
+                <div class="pet-anim"></div>
             </div>
         </div>
     </div>

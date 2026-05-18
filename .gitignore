@@ -22,3 +22,6 @@ local.properties
 
 # decompile reference snippets (not part of the build)
 csyx_reference_v_*.java
+
+# pasted screenshots / scratch images at repo root
+/image-*.png
