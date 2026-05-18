@@ -81,8 +81,11 @@ function forwardToServer(string $url, string $body, bool $gzip, array $extraHead
     curl_setopt_array($ch, [
         CURLOPT_POST => true, CURLOPT_POSTFIELDS => $postData,
         CURLOPT_HTTPHEADER => $headers, CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 15, CURLOPT_CONNECTTIMEOUT => 10,
+        CURLOPT_TIMEOUT => 8, CURLOPT_CONNECTTIMEOUT => 4,
         CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_TCP_KEEPALIVE => 1,
+        CURLOPT_TCP_NODELAY => 1,
+        CURLOPT_FORBID_REUSE => 0,
     ]);
     $response = curl_exec($ch);
     $error = curl_error($ch);
@@ -96,6 +99,31 @@ function forwardToServer(string $url, string $body, bool $gzip, array $extraHead
         'headers' => $headers,
         'curl_total_ms' => (int)round($totalTime * 1000),
     ];
+}
+
+function atomicWrite(string $file, string $contents): bool {
+    $dir = dirname($file);
+    if (!is_dir($dir)) @mkdir($dir, 0775, true);
+    $tmp = $file . '.' . bin2hex(random_bytes(4)) . '.tmp';
+    if (@file_put_contents($tmp, $contents) === false) return false;
+    if (!@rename($tmp, $file)) {
+        @unlink($tmp);
+        return false;
+    }
+    return true;
+}
+
+function deferred(callable $task): void {
+    static $queue = null;
+    if ($queue === null) {
+        $queue = [];
+        register_shutdown_function(function () use (&$queue) {
+            foreach ($queue as $job) {
+                try { $job(); } catch (\Throwable $_) {}
+            }
+        });
+    }
+    $queue[] = $task;
 }
 
 function jwtExp(string $token): int {
@@ -286,9 +314,12 @@ function api1LoginWithPassword(string $url, string $username, string $password):
 function appendLog(string $file, array $entry, int $max): void {
     $json = json_encode($entry, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     @file_put_contents($file, $json . "\n", FILE_APPEND | LOCK_EX);
+    if (mt_rand(1, 50) !== 1) return;
+    $size = @filesize($file);
+    if ($size === false || $size < 5 * 1024 * 1024) return;
     $lines = @file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
     if (is_array($lines) && count($lines) > $max) {
-        @file_put_contents($file, implode("\n", array_slice($lines, -$max)) . "\n", LOCK_EX);
+        atomicWrite($file, implode("\n", array_slice($lines, -$max)) . "\n");
     }
 }
 
@@ -306,8 +337,17 @@ function readLogs(string $file, int $limit = 50): array {
 }
 
 function jsonResp(array $data): void {
+    $payload = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     header('Content-Type: application/json; charset=utf-8');
-    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    header('Content-Length: ' . strlen($payload));
+    header('Connection: close');
+    echo $payload;
+    if (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request();
+    } else {
+        @ob_end_flush();
+        @flush();
+    }
     exit;
 }
 
@@ -604,12 +644,14 @@ function saveDecryptDump(string $encryptedData, string $plain, int $apiType, $de
         }
     }
 
-    @file_put_contents("$dumpDir/$dumpId.json", json_encode($dumpData, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    @file_put_contents("$dumpDir/$dumpId.json", json_encode($dumpData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
-    $dumps = glob("$dumpDir/*.json");
-    if (is_array($dumps) && count($dumps) > 20) {
-        usort($dumps, fn($a, $b) => filemtime($a) - filemtime($b));
-        for ($i = 0; $i < count($dumps) - 20; $i++) @unlink($dumps[$i]);
+    if (mt_rand(1, 30) === 1) {
+        $dumps = glob("$dumpDir/*.json");
+        if (is_array($dumps) && count($dumps) > 20) {
+            usort($dumps, fn($a, $b) => filemtime($a) - filemtime($b));
+            for ($i = 0; $i < count($dumps) - 20; $i++) @unlink($dumps[$i]);
+        }
     }
 
     return $dumpId;
@@ -620,12 +662,14 @@ function saveUploadDump(string $dumpId, array $detail): string {
     if (!is_dir($dumpDir)) @mkdir($dumpDir, 0755, true);
 
     $uploadId = $dumpId !== '' ? $dumpId : date('Ymd_His') . '_' . substr(md5(json_encode($detail)), 0, 8);
-    @file_put_contents("$dumpDir/$uploadId.json", json_encode($detail, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    @file_put_contents("$dumpDir/$uploadId.json", json_encode($detail, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
-    $dumps = glob("$dumpDir/*.json");
-    if (is_array($dumps) && count($dumps) > 50) {
-        usort($dumps, fn($a, $b) => filemtime($a) - filemtime($b));
-        for ($i = 0; $i < count($dumps) - 50; $i++) @unlink($dumps[$i]);
+    if (mt_rand(1, 50) === 1) {
+        $dumps = glob("$dumpDir/*.json");
+        if (is_array($dumps) && count($dumps) > 50) {
+            usort($dumps, fn($a, $b) => filemtime($a) - filemtime($b));
+            for ($i = 0; $i < count($dumps) - 50; $i++) @unlink($dumps[$i]);
+        }
     }
 
     return $uploadId;
@@ -713,7 +757,7 @@ function recordStats(string $dir, array $input, int $apiType, string $status, st
         $stats[$key]['records'] = array_slice($stats[$key]['records'], -200);
     }
 
-    @file_put_contents($file, json_encode($stats, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), LOCK_EX);
+    atomicWrite($file, json_encode($stats, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 }
 
 function recordFingerprintEnvEvent(string $dir, array $input): array {
@@ -765,7 +809,7 @@ function recordFingerprintEnvEvent(string $dir, array $input): array {
         $stats[$key]['records'] = array_slice($stats[$key]['records'], -200);
     }
 
-    @file_put_contents($file, json_encode($stats, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), LOCK_EX);
+    atomicWrite($file, json_encode($stats, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     return ['ok' => true, 'msg' => 'ok'];
 }
 
@@ -1351,7 +1395,7 @@ if ($apiType === 2) {
 // 转发
 $logEntry['forward_url'] = $target['url'];
 $logEntry['forward_attempts'] = [];
-$forwardMaxAttempts = $apiType === 1 ? 3 : 1;
+$forwardMaxAttempts = $apiType === 1 ? 2 : 1;
 for ($attempt = 1; $attempt <= $forwardMaxAttempts; $attempt++) {
     $stageMark = microtime(true);
     $result = forwardToServer($target['url'], $forwardBody, $target['gzip'], $forwardHeaders);
@@ -1398,16 +1442,17 @@ $uploadDetail = [
     'error' => $result['error'],
     'forward_attempts' => $logEntry['forward_attempts'] ?? [],
 ];
-$stageMark = microtime(true);
-$logEntry['upload_id'] = saveUploadDump((string)($logEntry['dump_id'] ?? ''), $uploadDetail);
-$logEntry['timing_ms']['upload_dump'] = durationMs($stageMark, microtime(true));
+$logEntry['upload_id'] = (string)($logEntry['dump_id'] ?? '');
 
 if ($result['error']) {
     $logEntry['status'] = 'forward_fail';
     $logEntry['error']  = $result['error'];
     $logEntry['timing_ms']['total'] = elapsedMs($requestStart);
-    appendLog($LOG_FILE, $logEntry, $MAX_LOGS);
-    recordStats($STATS_DIR, $input, $apiType, 'forward_fail');
+    deferred(function () use ($LOG_FILE, $logEntry, $MAX_LOGS, $STATS_DIR, $input, $apiType, $uploadDetail) {
+        appendLog($LOG_FILE, $logEntry, $MAX_LOGS);
+        recordStats($STATS_DIR, $input, $apiType, 'forward_fail');
+        saveUploadDump((string)($logEntry['upload_id'] ?? ''), $uploadDetail);
+    });
     jsonResp(['ok' => false, 'msg' => '转发失败: ' . $result['error']]);
 }
 
@@ -1422,11 +1467,14 @@ if ($apiType === 1) {
 $logEntry['status'] = $isForwardSuccess ? 'success' : 'task_server_error';
 $logEntry['response'] = $serverResp ?? $result['response'];
 $logEntry['timing_ms']['total'] = elapsedMs($requestStart);
-appendLog($LOG_FILE, $logEntry, $MAX_LOGS);
 
 $statsTaskId = '';
 if (is_array($taskInfo ?? null)) $statsTaskId = $taskInfo['ID'] ?? '';
-recordStats($STATS_DIR, $input, $apiType, $logEntry['status'], $statsTaskId);
+deferred(function () use ($LOG_FILE, $logEntry, $MAX_LOGS, $STATS_DIR, $input, $apiType, $statsTaskId, $uploadDetail) {
+    appendLog($LOG_FILE, $logEntry, $MAX_LOGS);
+    recordStats($STATS_DIR, $input, $apiType, $logEntry['status'], $statsTaskId);
+    saveUploadDump((string)($logEntry['upload_id'] ?? ''), $uploadDetail);
+});
 
 if ($serverResp) {
     jsonResp($serverResp);
