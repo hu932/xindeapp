@@ -15,18 +15,25 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.app.helper.R
 import com.app.helper.databinding.ActivityMainBinding
 import com.app.helper.network.ApiService
 import com.app.helper.network.UpdateResponse
 import com.app.helper.service.TaskService
 import com.app.helper.ui.login.LoginActivity
+import com.app.helper.util.FingerprintManager
 import com.app.helper.util.TokenManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
@@ -35,6 +42,7 @@ class MainActivity : AppCompatActivity() {
     private var updateReceiver: android.content.BroadcastReceiver? = null
     private var statsReceiver: android.content.BroadcastReceiver? = null
     private val activityScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val fpAdapter = FpAdapter()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,6 +74,8 @@ class MainActivity : AppCompatActivity() {
         binding.btnDelay3060.setOnClickListener { applyDelayPreset(30, 60) }
         refreshDelayUI()
         setupPauseConfig()
+        setupTabs()
+        setupFingerprintPage()
 
         binding.btnStartAuto.setOnClickListener {
             if (checkOverlayPermission()) {
@@ -98,6 +108,182 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnClearLog.setOnClickListener { binding.tvLogs.text = "" }
+    }
+
+    private fun setupTabs() {
+        binding.tabGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (!isChecked) return@addOnButtonCheckedListener
+            val showEnv = checkedId == R.id.tab_env
+            binding.pageTask.visibility = if (showEnv) android.view.View.GONE else android.view.View.VISIBLE
+            binding.pageEnv.visibility = if (showEnv) android.view.View.VISIBLE else android.view.View.GONE
+            if (showEnv) refreshFpList()
+        }
+    }
+
+    private fun setupFingerprintPage() {
+        binding.rvFpList.layoutManager = LinearLayoutManager(this)
+        binding.rvFpList.adapter = fpAdapter
+        binding.btnGenerateFp.setOnClickListener { generateNewFp() }
+        binding.btnBatchGenerateFp.setOnClickListener { batchGenerateFp() }
+        refreshFpList()
+    }
+
+    private fun generateNewFp() {
+        val fp = FingerprintManager.generateFullFp(this)
+        val name = fp.optString("name", "fp_${System.currentTimeMillis()}")
+        FingerprintManager.saveFingerprintData(this, name, fp.toString())
+        reportFpEvent("generate", name, fp.toString())
+        Toast.makeText(this, "已生成：$name", Toast.LENGTH_SHORT).show()
+        refreshFpList()
+    }
+
+    private fun batchGenerateFp() {
+        val counts = arrayOf("5", "10", "20", "50")
+        AlertDialog.Builder(this)
+            .setTitle("批量生成")
+            .setItems(counts) { _, which ->
+                val count = counts[which].toInt()
+                Thread {
+                    val generated = mutableListOf<Pair<String, String>>()
+                    repeat(count) { index ->
+                        val fp = FingerprintManager.generateFullFp(this)
+                        val name = fp.optString("name", "fp_${System.currentTimeMillis()}_$index")
+                        FingerprintManager.saveFingerprintData(this, name, fp.toString())
+                        generated.add(name to fp.toString())
+                        Thread.sleep(10)
+                    }
+                    runOnUiThread {
+                        generated.forEach { (name, data) -> reportFpEvent("generate", name, data) }
+                        Toast.makeText(this, "已生成 $count 个指纹", Toast.LENGTH_SHORT).show()
+                        refreshFpList()
+                    }
+                }.start()
+            }
+            .show()
+    }
+
+    private fun refreshFpList() {
+        val files = FingerprintManager.listFpFiles(this)
+        fpAdapter.setData(files)
+        binding.tvFpCount.text = "总数：${files.size}"
+    }
+
+    private fun showFpOptions(item: FingerprintManager.FpFileInfo) {
+        val options = mutableListOf("使用此指纹", "查看详情", "删除")
+        if (item.isActive) options[0] = "当前指纹"
+
+        AlertDialog.Builder(this)
+            .setTitle(item.name)
+            .setItems(options.toTypedArray()) { _, which ->
+                when (which) {
+                    0 -> {
+                        FingerprintManager.setActiveFp(this, item.name)
+                        FingerprintManager.loadFingerprintData(this, item.name)?.let { data ->
+                            reportFpEvent("write", item.name, data)
+                        }
+                        Toast.makeText(this, "当前指纹：${item.name}", Toast.LENGTH_SHORT).show()
+                        refreshFpList()
+                    }
+                    1 -> showFpDetail(item.name)
+                    2 -> AlertDialog.Builder(this)
+                        .setTitle("删除指纹")
+                        .setMessage("确定删除 ${item.name}？")
+                        .setPositiveButton("删除") { _, _ ->
+                            FingerprintManager.deleteFpFile(this, item.name)
+                            refreshFpList()
+                        }
+                        .setNegativeButton("取消", null)
+                        .show()
+                }
+            }
+            .show()
+    }
+
+    private fun showFpDetail(filename: String) {
+        val data = FingerprintManager.loadFingerprintData(this, filename) ?: return
+        try {
+            val json = JSONObject(data)
+            val info = buildString {
+                appendLine("Android 标识：${json.optString("androidId")}")
+                appendLine("GSF 标识：${json.optString("gsfAndroidId")}")
+                appendLine("广告标识：${json.optString("advertiserId")}")
+                appendLine("SIM 状态：${json.optString("gsm.sim.state")}")
+                appendLine("运营商：${json.optString("gsm.operator.alpha")}")
+                appendLine("总内存：${json.optString("totalMem").toLongOrNull()?.div(1024 * 1024 * 1024) ?: "?"}GB")
+                appendLine("存储空间：${json.optString("totalSize").toLongOrNull()?.div(1024 * 1024 * 1024) ?: "?"}GB")
+                appendLine("启动次数：${json.optString("bootCount")}")
+                appendLine()
+                val f7 = json.optString("f7_params")
+                if (f7.isNotEmpty()) {
+                    val f7Json = JSONObject(f7)
+                    appendLine("--- F7 参数 ---")
+                    appendLine("序列号池：${f7Json.optJSONArray("serialHexPool")?.length() ?: 0}")
+                    appendLine("SN 池：${f7Json.optJSONArray("snHexPool")?.length() ?: 0}")
+                    appendLine("C1 偏移：${f7Json.optInt("c1TimeOffsetDays")} 天")
+                    appendLine("C2 偏移：${f7Json.optInt("c2TimeOffsetDays")} 天")
+                    appendLine("叶子偏移：${f7Json.optInt("leafOffsetDays")} 天")
+                    appendLine("叶子间隔：${f7Json.optInt("leafGapMs")}ms")
+                    appendLine("vbh2: ${f7Json.optString("vbh2").take(16)}...")
+                }
+            }
+            AlertDialog.Builder(this)
+                .setTitle(filename)
+                .setMessage(info)
+                .setPositiveButton("确定", null)
+                .show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "解析失败：${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun reportFpEvent(event: String, name: String, data: String) {
+        activityScope.launch {
+            try {
+                ApiService.reportFingerprintEvent(event, name, data)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    inner class FpAdapter : RecyclerView.Adapter<FpAdapter.VH>() {
+        private var items = listOf<FingerprintManager.FpFileInfo>()
+
+        fun setData(data: List<FingerprintManager.FpFileInfo>) {
+            items = data
+            notifyDataSetChanged()
+        }
+
+        override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): VH {
+            val view = layoutInflater.inflate(R.layout.item_fp, parent, false)
+            return VH(view)
+        }
+
+        override fun onBindViewHolder(holder: VH, position: Int) {
+            holder.bind(items[position])
+        }
+
+        override fun getItemCount() = items.size
+
+        inner class VH(view: android.view.View) : RecyclerView.ViewHolder(view) {
+            private val tvName: android.widget.TextView = view.findViewById(R.id.tv_fp_name)
+            private val tvInfo: android.widget.TextView = view.findViewById(R.id.tv_fp_info)
+            private val tvActive: android.widget.TextView = view.findViewById(R.id.tv_fp_active)
+
+            fun bind(item: FingerprintManager.FpFileInfo) {
+                tvName.text = item.name
+                val date = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(item.lastModified))
+                val sizeKb = item.size / 1024
+                val androidId = try {
+                    val data = FingerprintManager.loadFingerprintData(this@MainActivity, item.name)
+                    if (data != null) JSONObject(data).optString("androidId", "").take(8) + "..." else ""
+                } catch (_: Exception) {
+                    ""
+                }
+                tvInfo.text = "${sizeKb}KB | $date | 标识：$androidId"
+                tvActive.visibility = if (item.isActive) android.view.View.VISIBLE else android.view.View.GONE
+                itemView.setOnClickListener { showFpOptions(item) }
+            }
+        }
     }
 
     private fun appendLog(msg: String) {
@@ -329,9 +515,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun downloadApk(apkUrl: String, versionName: String) {
         try {
-            val fileName = "格界13-14-${versionName.ifBlank { "更新" }}.apk"
+            val fileName = "格界32-34-${versionName.ifBlank { "更新" }}.apk"
             val request = DownloadManager.Request(Uri.parse(apkUrl))
-                .setTitle("格界13-14 更新")
+                .setTitle("格界32-34 更新")
                 .setDescription("正在下载更新")
                 .setMimeType("application/vnd.android.package-archive")
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)

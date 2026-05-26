@@ -14,4 +14,8 @@ object ApiConfig {
 
     const val TARGET_PACKAGE = "com.shopee.tw"
     const val WAKE_ACTION = "com.oppo.wake.launch.action"
+
+    const val CONTENT_PROVIDER_AUTHORITY = "com.yh.csyxgl.vivo.provider"
+    const val CONTENT_PROVIDER_PATH_CURRENT = "current_fp"
+    const val CONTENT_PROVIDER_PATH_FINGERPRINT_CURRENT = "fingerprint/current"
 }

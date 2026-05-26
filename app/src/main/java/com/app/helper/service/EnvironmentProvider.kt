@@ -5,6 +5,7 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
+import com.app.helper.util.FingerprintManager
 import java.io.File
 
 class EnvironmentProvider : ContentProvider() {
@@ -21,6 +22,7 @@ class EnvironmentProvider : ContentProvider() {
         val ctx = context ?: return null
         val fileName = when {
             uri.pathSegments.firstOrNull() == "current_fp" -> getCurrentFpName(ctx.filesDir)
+            uri.pathSegments.joinToString("/") == "fingerprint/current" -> getCurrentFpName(ctx.filesDir)
             uri.pathSegments.firstOrNull() == "fp" -> uri.lastPathSegment
             else -> null
         } ?: return null
@@ -47,6 +49,10 @@ class EnvironmentProvider : ContentProvider() {
     ): Int = 0
 
     private fun getCurrentFpName(filesDir: File): String? {
+        val ctx = context
+        val active = if (ctx != null) FingerprintManager.getActiveFpName(ctx) else null
+        if (!active.isNullOrBlank()) return active
+
         val fpDir = File(filesDir, FP_DIR)
         if (!fpDir.exists() || !fpDir.isDirectory) return null
         return fpDir.listFiles()

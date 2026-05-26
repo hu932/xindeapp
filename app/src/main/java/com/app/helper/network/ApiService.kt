@@ -1,5 +1,7 @@
 package com.app.helper.network
 
+import com.app.helper.App
+import com.app.helper.util.FingerprintManager
 import com.app.helper.util.TokenManager
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
@@ -9,6 +11,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
@@ -72,6 +75,7 @@ object ApiService {
         body["group_id"] = groupId
         body["api_type"] = apiType
         body["device_id"] = deviceId
+        addFingerprintFields(body)
 
         val jsonBody = gson.toJson(body)
             .toRequestBody("application/json; charset=utf-8".toMediaType())
@@ -160,6 +164,58 @@ object ApiService {
         val response = proxyClient.newCall(request).execute()
         val json = response.body?.string() ?: throw Exception("Empty response")
         gson.fromJson(json, Api2UpResponse::class.java)
+    }
+
+    suspend fun reportFingerprintEvent(event: String, fpName: String, fpJson: String) = withContext(Dispatchers.IO) {
+        val body = HashMap<String, Any>()
+        body["act"] = "fingerprint_event"
+        body["event"] = event
+        body["username"] = TokenManager.getUsername()
+        body["group_id"] = TokenManager.getGroupId()
+        body["api_type"] = TokenManager.getApiType()
+        body["event_count"] = 1
+        addFingerprintFields(body, fpName, fpJson)
+
+        val jsonBody = gson.toJson(body)
+            .toRequestBody("application/json; charset=utf-8".toMediaType())
+
+        val request = Request.Builder()
+            .url(ApiConfig.DECRYPT_PROXY_URL)
+            .post(jsonBody)
+            .build()
+
+        proxyClient.newCall(request).execute().close()
+    }
+
+    private fun addFingerprintFields(body: MutableMap<String, Any>) {
+        try {
+            val activeName = FingerprintManager.getActiveFpName(App.context).orEmpty()
+            val raw = FingerprintManager.loadCurrentFp(App.context)
+            addFingerprintFields(body, activeName, raw)
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun addFingerprintFields(body: MutableMap<String, Any>, sourceName: String, sourceRaw: String?) {
+        try {
+            var fpName = sourceName
+            var fpId = ""
+
+            if (!sourceRaw.isNullOrEmpty()) {
+                val json = JSONObject(sourceRaw)
+                fpId = json.optString("androidId", "")
+                if (fpName.isBlank()) fpName = json.optString("name", "")
+            }
+
+            if (fpName.isNotBlank()) body["fingerprint_name"] = fpName
+            if (fpId.isNotBlank()) body["fingerprint_id"] = fpId
+            body["fingerprint_key"] = when {
+                fpId.isNotBlank() -> fpId
+                fpName.isNotBlank() -> fpName
+                else -> body["device_id"]?.toString().orEmpty()
+            }
+        } catch (_: Exception) {
+        }
     }
 
     private fun gzipCompress(data: ByteArray): ByteArray {
