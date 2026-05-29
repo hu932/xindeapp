@@ -188,7 +188,11 @@ class ChatTaskAccessibilityService : AccessibilityService() {
 
     private fun findEditable(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         if (isOwnAppNode(node)) return null
+        val viewId = node.viewIdResourceName.orEmpty().lowercase()
+        val label = nodeLabel(node).lowercase()
         if (node.isEditable && node.isEnabled) return node
+        if (node.isEnabled && chatInputIdHints.any { viewId.contains(it) }) return node
+        if (node.isEnabled && chatInputTextHints.any { label.contains(it) }) return node
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
             findEditable(child)?.let { return it }
@@ -198,10 +202,12 @@ class ChatTaskAccessibilityService : AccessibilityService() {
 
     private fun findSendButton(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         if (isOwnAppNode(node)) return null
-        val label = (node.text ?: node.contentDescription)?.toString()?.trim().orEmpty()
+        val label = nodeLabel(node)
         val viewId = node.viewIdResourceName.orEmpty().lowercase()
         if (node.isEnabled && (node.isClickable || node.isFocusable)) {
-            if (label in sendLabels || sendIdHints.any { viewId.contains(it) }) return node
+            if (sendLabels.any { label.equals(it, ignoreCase = true) } ||
+                sendIdHints.any { viewId.contains(it) }
+            ) return node
         }
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
@@ -212,10 +218,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
 
     private fun findUrlNode(node: AccessibilityNodeInfo, needle: String): AccessibilityNodeInfo? {
         if (isOwnAppNode(node)) return null
-        val text = buildString {
-            node.text?.let { append(it) }
-            node.contentDescription?.let { append(' ').append(it) }
-        }
+        val text = nodeLabel(node)
         if (text.contains(needle, ignoreCase = true) && (node.isClickable || node.parent != null)) {
             return node
         }
@@ -301,17 +304,26 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     }
 
     private fun activeContentRoot(): AccessibilityNodeInfo? {
-        windows
+        val allRoots = windows
             ?.asSequence()
             ?.mapNotNull { it.root }
-            ?.firstOrNull { !isOwnAppNode(it) }
-            ?.let { return it }
+            ?.filter { !isOwnAppNode(it) }
+            ?.toList()
+            .orEmpty()
+
+        allRoots.firstOrNull { isShopeeNode(it) }?.let { return it }
+        allRoots.firstOrNull()?.let { return it }
         return rootInActiveWindow?.takeUnless { isOwnAppNode(it) }
     }
 
     private fun isProbablyChatScreen(root: AccessibilityNodeInfo): Boolean {
-        if (findEditable(root) != null && findSendButton(root) != null) return true
-        return findEditable(root) != null && containsAnyText(root, chatHints)
+        val input = findEditable(root) ?: return false
+        if (findSendButton(root) != null) return true
+        val inputLabel = nodeLabel(input).lowercase()
+        val inputId = input.viewIdResourceName.orEmpty().lowercase()
+        val looksLikeChatInput = chatInputIdHints.any { inputId.contains(it) } ||
+            chatInputTextHints.any { inputLabel.contains(it) }
+        return looksLikeChatInput && containsAnyText(root, chatHints)
     }
 
     private fun closeDialogButton(node: AccessibilityNodeInfo): Boolean {
@@ -373,7 +385,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     ): AccessibilityNodeInfo? {
         val rect = Rect()
         node.getBoundsInScreen(rect)
-        val label = (node.text ?: node.contentDescription)?.toString()?.trim().orEmpty()
+        val label = nodeLabel(node)
         val viewId = node.viewIdResourceName.orEmpty().lowercase()
         val smallIcon = rect.width() in 18..96 && rect.height() in 18..96
         val minX = (screenWidth * 0.55f).toInt()
@@ -396,10 +408,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
 
     private fun containsAnyText(node: AccessibilityNodeInfo, needles: Set<String>): Boolean {
         if (isOwnAppNode(node)) return false
-        val text = buildString {
-            node.text?.let { append(it) }
-            node.contentDescription?.let { append(' ').append(it) }
-        }
+        val text = nodeLabel(node)
         if (needles.any { text.contains(it, ignoreCase = true) }) return true
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
@@ -412,11 +421,34 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         return node.packageName?.toString() == packageName
     }
 
+    private fun isShopeeNode(node: AccessibilityNodeInfo): Boolean {
+        val pkg = node.packageName?.toString().orEmpty()
+        return pkg.contains("shopee", ignoreCase = true)
+    }
+
+    private fun nodeLabel(node: AccessibilityNodeInfo): String {
+        return buildString {
+            node.text?.let { append(it) }
+            node.contentDescription?.let { append(' ').append(it) }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                node.hintText?.let { append(' ').append(it) }
+            }
+        }.trim()
+    }
+
     private val sendLabels = setOf(
         "发送", "送出", "傳送", "传送", "Send", "send", "Enter", "enter", "Go", "go", "进入", "前往"
     )
 
     private val sendIdHints = listOf("send", "submit", "enter", "go")
+
+    private val chatInputIdHints = listOf(
+        "input", "edit", "message", "chat", "compose", "edt"
+    )
+
+    private val chatInputTextHints = listOf(
+        "輸入", "输入", "訊息", "消息", "私訊", "私信", "message", "chat"
+    )
 
     private val dialogCloseLabels = setOf(
         "关闭", "關閉", "取消", "稍后", "稍後", "知道了", "我知道了", "确定", "確認",

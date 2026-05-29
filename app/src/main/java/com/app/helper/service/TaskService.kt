@@ -228,7 +228,12 @@ class TaskService : android.app.Service() {
     }
 
     private fun updateFloatStatus(message: String) {
-        statusMessage = "$message\n账号：${TokenManager.getUsername()}\n当日上传成功：$uploadCount"
+        val compactMessage = message
+            .replace("自动领取任务", "领任务")
+            .replace("自动执行", "自动")
+            .replace("请保持聊天输入框可用", "保持聊天页")
+            .replace("当日上传成功", "今日")
+        statusMessage = "$compactMessage\n账号:${TokenManager.getUsername()} 今日:$uploadCount"
         handler.post { if (!isCollapsed) tvStatus?.text = statusMessage }
         try { sendBroadcast(Intent("com.app.helper.LOG_ACTION").putExtra("log_msg", message)) } catch (_: Exception) {}
     }

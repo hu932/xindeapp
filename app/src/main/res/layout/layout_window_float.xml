@@ -5,8 +5,8 @@
 
     <LinearLayout
         android:id="@+id/ll_dot_container"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
         android:background="@drawable/bg_float_dot_new"
         android:elevation="6dp"
         android:gravity="center"
@@ -16,20 +16,23 @@
             android:id="@+id/tv_dot"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="格界"
+            android:text="格"
             android:textColor="#FFFFFF"
-            android:textSize="13sp"
+            android:textSize="14sp"
             android:textStyle="bold" />
     </LinearLayout>
 
     <LinearLayout
         android:id="@+id/ll_expanded"
-        android:layout_width="220dp"
+        android:layout_width="176dp"
         android:layout_height="wrap_content"
         android:background="@drawable/bg_float_panel"
         android:elevation="6dp"
         android:orientation="vertical"
-        android:padding="10dp">
+        android:paddingStart="8dp"
+        android:paddingTop="7dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="8dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -38,9 +41,9 @@
             android:orientation="horizontal">
 
             <View
-                android:layout_width="6dp"
-                android:layout_height="6dp"
-                android:layout_marginEnd="6dp"
+                android:layout_width="5dp"
+                android:layout_height="5dp"
+                android:layout_marginEnd="5dp"
                 android:background="@drawable/bg_float_dot_new" />
 
             <TextView
@@ -49,13 +52,13 @@
                 android:layout_weight="1"
                 android:text="格界 32-34"
                 android:textColor="#FFFFFF"
-                android:textSize="13sp"
+                android:textSize="11sp"
                 android:textStyle="bold" />
 
             <ImageView
                 android:id="@+id/img_close"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
                 android:background="?android:attr/selectableItemBackgroundBorderless"
                 android:padding="4dp"
                 android:scaleType="centerInside"
@@ -66,31 +69,33 @@
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:layout_marginTop="6dp"
-            android:layout_marginBottom="6dp"
+            android:layout_marginTop="5dp"
+            android:layout_marginBottom="5dp"
             android:background="#22FFFFFF" />
 
         <TextView
             android:id="@+id/tv_status"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:ellipsize="end"
             android:gravity="start"
-            android:lineSpacingExtra="2dp"
-            android:minHeight="76dp"
+            android:lineSpacingExtra="1dp"
+            android:maxLines="4"
+            android:minHeight="45dp"
             android:text="点击下方按钮开始"
             android:textColor="#FFEB3B"
-            android:textSize="12sp" />
+            android:textSize="10sp" />
 
         <TextView
             android:id="@+id/tv_action"
             android:layout_width="match_parent"
-            android:layout_height="40dp"
-            android:layout_marginTop="8dp"
+            android:layout_height="30dp"
+            android:layout_marginTop="6dp"
             android:background="@drawable/bg_float_action"
             android:gravity="center"
             android:text="一键做任务"
             android:textColor="#FFFFFF"
-            android:textSize="14sp"
+            android:textSize="12sp"
             android:textStyle="bold" />
     </LinearLayout>
 </RelativeLayout>
