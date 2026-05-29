@@ -40,6 +40,7 @@ class TaskService : android.app.Service() {
         private const val CHANNEL_ID = "app_service_channel"
         private const val NOTIFICATION_ID = 1001
         private const val PREF_NAME = "task_config"
+        private const val RETURN_SETTLE_DELAY_MS = 2_500L
         var isRunning = false
             private set
     }
@@ -290,7 +291,7 @@ class TaskService : android.app.Service() {
 
     // ==================== Task Flow ====================
 
-    private fun startNextTaskCycle(forceDelaySec: Int? = null) {
+    private fun startNextTaskCycle(forceDelaySec: Int? = null, alreadyWaitedMs: Long = 0L) {
         if (!isAutoRunning) return
         if (versionBlocked) {
             isAutoRunning = false
@@ -302,22 +303,27 @@ class TaskService : android.app.Service() {
             stopAutoForDeviceBlock()
             return
         }
-        val delaySec = if (forceDelaySec != null) {
-            forceDelaySec.coerceAtLeast(1)
+        val delayMs = if (forceDelaySec != null) {
+            forceDelaySec.coerceAtLeast(1) * 1000L
         } else {
-            val min = delayMin.coerceAtLeast(1)
+            val min = delayMin.coerceAtLeast(0)
             val max = delayMax.coerceAtLeast(min)
-            (min..max).random()
+            (min..max).random() * 1000L
         }
+        val remainingDelayMs = (delayMs - alreadyWaitedMs).coerceAtLeast(0L)
         val tipPrefix = if (forceDelaySec != null) "风控重试" else "自动领取任务"
 
         countdownJob?.cancel()
         countdownJob = serviceScope.launch {
-            for (i in delaySec downTo 1) {
+            var remainingMs = remainingDelayMs
+            while (remainingMs > 0L) {
                 if (!isAutoRunning) return@launch
                 if (isUploading) { delay(1000); continue }
-                updateFloatStatus("$tipPrefix，${i}s后执行...")
-                delay(1000)
+                val displaySec = ((remainingMs + 999L) / 1000L).toInt()
+                updateFloatStatus("$tipPrefix，${displaySec}s后执行...")
+                val stepMs = remainingMs.coerceAtMost(1000L)
+                delay(stepMs)
+                remainingMs -= stepMs
             }
             if (isAutoRunning && !isUploading) {
                 updateFloatStatus("自动领取任务中...")
@@ -525,8 +531,10 @@ class TaskService : android.app.Service() {
             currentTaskId = ""
             broadcastStats()
             returnToChatScreen()
-            delay(2_200L)
-            if (isAutoRunning && !triggerPauseRestIfNeeded()) startNextTaskCycle()
+            delay(RETURN_SETTLE_DELAY_MS)
+            if (isAutoRunning && !triggerPauseRestIfNeeded()) {
+                startNextTaskCycle(alreadyWaitedMs = RETURN_SETTLE_DELAY_MS)
+            }
         }
     }
 
@@ -565,8 +573,10 @@ class TaskService : android.app.Service() {
             currentApi2TaskInfo = null
             broadcastStats()
             returnToChatScreen()
-            delay(2_200L)
-            if (isAutoRunning && !triggerPauseRestIfNeeded()) startNextTaskCycle()
+            delay(RETURN_SETTLE_DELAY_MS)
+            if (isAutoRunning && !triggerPauseRestIfNeeded()) {
+                startNextTaskCycle(alreadyWaitedMs = RETURN_SETTLE_DELAY_MS)
+            }
         }
     }
 

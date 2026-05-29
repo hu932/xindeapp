@@ -35,6 +35,8 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     }
 
     private val handler = Handler(Looper.getMainLooper())
+    private val runPendingUrlRunnable = Runnable { runPendingUrl() }
+    private val linkAttemptRunnables = mutableListOf<Runnable>()
     private var receiver: BroadcastReceiver? = null
     private var pendingUrl: String? = null
     private var returnBackUsed = false
@@ -66,12 +68,12 @@ class ChatTaskAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (pendingUrl != null) {
-            handler.removeCallbacksAndMessages(null)
-            handler.postDelayed({ runPendingUrl() }, 250L)
+            handler.removeCallbacks(runPendingUrlRunnable)
+            handler.postDelayed(runPendingUrlRunnable, 250L)
             return
         }
 
-        val root = rootInActiveWindow ?: return
+        val root = activeContentRoot() ?: return
         if (containsAnyText(root, productUnavailableHints)) {
             closeBlockingPopup(root)
             sendBroadcast(Intent(ACTION_PRODUCT_BLOCKED))
@@ -93,10 +95,12 @@ class ChatTaskAccessibilityService : AccessibilityService() {
                     ACTION_OPEN_TASK_URL -> {
                         val url = intent.getStringExtra(EXTRA_URL)?.trim().orEmpty()
                         if (url.isBlank()) return
+                        cancelLinkAttempts()
                         pendingUrl = url
-                        handler.post { runPendingUrl() }
+                        handler.post(runPendingUrlRunnable)
                     }
                     ACTION_RETURN_TO_CHAT -> {
+                        cancelLinkAttempts()
                         handler.post { returnToChatScreen() }
                     }
                 }
@@ -115,7 +119,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
 
     private fun runPendingUrl() {
         val url = pendingUrl ?: return
-        val root = rootInActiveWindow ?: return
+        val root = activeContentRoot() ?: return
         val input = findEditable(root)
         if (input == null) {
             Log.w(TAG, "No editable input found")
@@ -152,7 +156,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     }
 
     private fun clickSendOrEnter(url: String) {
-        val root = rootInActiveWindow ?: return
+        val root = activeContentRoot() ?: return
         val sendNode = findSendButton(root)
         if (sendNode != null && clickNode(sendNode)) {
             return
@@ -160,19 +164,30 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     }
 
     private fun scheduleLinkOpenAttempts(url: String) {
+        cancelLinkAttempts()
         listOf(1800L, 2600L, 3600L, 5000L).forEach { delayMs ->
-            handler.postDelayed({ clickVisibleTaskLink(url) }, delayMs)
+            val runnable = Runnable {
+                if (clickVisibleTaskLink(url)) cancelLinkAttempts()
+            }
+            linkAttemptRunnables.add(runnable)
+            handler.postDelayed(runnable, delayMs)
         }
     }
 
+    private fun cancelLinkAttempts() {
+        linkAttemptRunnables.forEach { handler.removeCallbacks(it) }
+        linkAttemptRunnables.clear()
+    }
+
     private fun clickVisibleTaskLink(url: String): Boolean {
-        val root = rootInActiveWindow ?: return false
+        val root = activeContentRoot() ?: return false
         if (!isProbablyChatScreen(root)) return false
         val node = findProductLinkNode(root, url) ?: return false
         return clickNode(node) || clickNodeCenter(node)
     }
 
     private fun findEditable(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        if (isOwnAppNode(node)) return null
         if (node.isEditable && node.isEnabled) return node
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
@@ -182,6 +197,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     }
 
     private fun findSendButton(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        if (isOwnAppNode(node)) return null
         val label = (node.text ?: node.contentDescription)?.toString()?.trim().orEmpty()
         val viewId = node.viewIdResourceName.orEmpty().lowercase()
         if (node.isEnabled && (node.isClickable || node.isFocusable)) {
@@ -195,6 +211,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     }
 
     private fun findUrlNode(node: AccessibilityNodeInfo, needle: String): AccessibilityNodeInfo? {
+        if (isOwnAppNode(node)) return null
         val text = buildString {
             node.text?.let { append(it) }
             node.contentDescription?.let { append(' ').append(it) }
@@ -256,7 +273,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
 
     private fun returnToChatScreen() {
         returnBackUsed = false
-        val root = rootInActiveWindow
+        val root = activeContentRoot()
         if (root != null && isProbablyChatScreen(root)) return
 
         if (root != null && closeBlockingPopup(root)) {
@@ -270,7 +287,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
 
     private fun singleBackToChatIfNeeded() {
         if (returnBackUsed) return
-        val root = rootInActiveWindow
+        val root = activeContentRoot()
         if (root != null && isProbablyChatScreen(root)) {
             return
         }
@@ -279,8 +296,17 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     }
 
     private fun closeDialogOnlyIfStillBlocking() {
-        val root = rootInActiveWindow ?: return
+        val root = activeContentRoot() ?: return
         if (!isProbablyChatScreen(root)) closeBlockingPopup(root)
+    }
+
+    private fun activeContentRoot(): AccessibilityNodeInfo? {
+        windows
+            ?.asSequence()
+            ?.mapNotNull { it.root }
+            ?.firstOrNull { !isOwnAppNode(it) }
+            ?.let { return it }
+        return rootInActiveWindow?.takeUnless { isOwnAppNode(it) }
     }
 
     private fun isProbablyChatScreen(root: AccessibilityNodeInfo): Boolean {
@@ -369,6 +395,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     }
 
     private fun containsAnyText(node: AccessibilityNodeInfo, needles: Set<String>): Boolean {
+        if (isOwnAppNode(node)) return false
         val text = buildString {
             node.text?.let { append(it) }
             node.contentDescription?.let { append(' ').append(it) }
@@ -379,6 +406,10 @@ class ChatTaskAccessibilityService : AccessibilityService() {
             if (containsAnyText(child, needles)) return true
         }
         return false
+    }
+
+    private fun isOwnAppNode(node: AccessibilityNodeInfo): Boolean {
+        return node.packageName?.toString() == packageName
     }
 
     private val sendLabels = setOf(
