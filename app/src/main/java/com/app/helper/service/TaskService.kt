@@ -141,6 +141,7 @@ class TaskService : android.app.Service() {
         super.onDestroy()
         isRunning = false
         isAutoRunning = false
+        cancelChatAutomation()
         serviceScope.cancel()
         countdownJob?.cancel()
         heartbeatJob?.cancel()
@@ -275,6 +276,7 @@ class TaskService : android.app.Service() {
             isAutoRunning = false
             countdownJob?.cancel()
             pauseJob?.cancel()
+            cancelChatAutomation()
             handler.post {
                 tvAction?.text = "一键做任务"
                 tvAction?.setBackgroundResource(R.drawable.bg_float_action)
@@ -301,6 +303,7 @@ class TaskService : android.app.Service() {
         if (versionBlocked) {
             isAutoRunning = false
             handler.post { tvAction?.text = "一键做任务"; tvAction?.setBackgroundResource(R.drawable.bg_float_action) }
+            cancelChatAutomation()
             updateFloatStatus("$versionBlockedMsg\n已停止自动执行")
             return
         }
@@ -348,6 +351,7 @@ class TaskService : android.app.Service() {
                 tvAction?.text = "一键做任务"
                 tvAction?.setBackgroundResource(R.drawable.bg_float_action)
             }
+            cancelChatAutomation()
             updateFloatStatus("请先开启【格界聊天任务辅助】，并手动打开聊天页面")
             return
         }
@@ -491,6 +495,7 @@ class TaskService : android.app.Service() {
         if (consecutiveTimeouts >= 2) {
             isAutoRunning = false
             handler.post { tvAction?.text = "一键做任务"; tvAction?.setBackgroundResource(R.drawable.bg_float_action) }
+            cancelChatAutomation()
             updateFloatStatus("疑似风控！连续${consecutiveTimeouts}次超时\n已自动暂停，请检查环境")
             consecutiveTimeouts = 0
             return false
@@ -662,6 +667,7 @@ class TaskService : android.app.Service() {
         isUploading = false
         countdownJob?.cancel()
         pauseJob?.cancel()
+        cancelChatAutomation()
         handler.post { tvAction?.text = "一键做任务"; tvAction?.setBackgroundResource(R.drawable.bg_float_action) }
         updateFloatStatus(deviceBlockedMsg)
     }
@@ -688,6 +694,7 @@ class TaskService : android.app.Service() {
                         if (isAutoRunning) {
                             isAutoRunning = false
                             countdownJob?.cancel()
+                            cancelChatAutomation()
                             handler.post { tvAction?.text = "一键做任务"; tvAction?.setBackgroundResource(R.drawable.bg_float_action) }
                             updateFloatStatus("$versionBlockedMsg\n已停止自动执行")
                         }
@@ -737,7 +744,14 @@ class TaskService : android.app.Service() {
         } catch (_: Exception) {}
         isAutoRunning = false
         handler.post { tvAction?.text = "一键做任务"; tvAction?.setBackgroundResource(R.drawable.bg_float_action) }
+        cancelChatAutomation()
         updateFloatStatus("登录失效，请重新登录")
+    }
+
+    private fun cancelChatAutomation() {
+        try {
+            sendBroadcast(Intent(ChatTaskAccessibilityService.ACTION_CANCEL_CHAT_TASK))
+        } catch (_: Exception) {}
     }
 
     // ==================== Broadcast Receiver ====================

@@ -26,6 +26,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         private const val TAG = "ChatTaskAccessibility"
         const val ACTION_OPEN_TASK_URL = "com.app.helper.OPEN_TASK_URL_IN_CHAT"
         const val ACTION_RETURN_TO_CHAT = "com.app.helper.RETURN_TO_CHAT"
+        const val ACTION_CANCEL_CHAT_TASK = "com.app.helper.CANCEL_CHAT_TASK"
         const val ACTION_PRODUCT_BLOCKED = "com.app.helper.PRODUCT_BLOCKED"
         const val EXTRA_URL = "url"
 
@@ -103,12 +104,16 @@ class ChatTaskAccessibilityService : AccessibilityService() {
                         cancelLinkAttempts()
                         handler.post { returnToChatScreen() }
                     }
+                    ACTION_CANCEL_CHAT_TASK -> {
+                        cancelAutomation()
+                    }
                 }
             }
         }
         val filter = IntentFilter().apply {
             addAction(ACTION_OPEN_TASK_URL)
             addAction(ACTION_RETURN_TO_CHAT)
+            addAction(ACTION_CANCEL_CHAT_TASK)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(receiver, filter, RECEIVER_EXPORTED)
@@ -179,6 +184,12 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         linkAttemptRunnables.clear()
     }
 
+    private fun cancelAutomation() {
+        pendingUrl = null
+        handler.removeCallbacksAndMessages(null)
+        cancelLinkAttempts()
+    }
+
     private fun clickVisibleTaskLink(url: String): Boolean {
         val root = activeContentRoot() ?: return false
         if (!isProbablyChatScreen(root)) return false
@@ -190,9 +201,9 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         if (isOwnAppNode(node)) return null
         val viewId = node.viewIdResourceName.orEmpty().lowercase()
         val label = nodeLabel(node).lowercase()
-        if (node.isEditable && node.isEnabled) return node
-        if (node.isEnabled && chatInputIdHints.any { viewId.contains(it) }) return node
-        if (node.isEnabled && chatInputTextHints.any { label.contains(it) }) return node
+        if (node.isEnabled && isRealEditableNode(node)) return node
+        if (node.isEnabled && canSetText(node) && chatInputIdHints.any { viewId.contains(it) }) return node
+        if (node.isEnabled && canSetText(node) && chatInputTextHints.any { label.contains(it) }) return node
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
             findEditable(child)?.let { return it }
@@ -419,6 +430,14 @@ class ChatTaskAccessibilityService : AccessibilityService() {
 
     private fun isOwnAppNode(node: AccessibilityNodeInfo): Boolean {
         return node.packageName?.toString() == packageName
+    }
+
+    private fun isRealEditableNode(node: AccessibilityNodeInfo): Boolean {
+        return node.isEditable || canSetText(node)
+    }
+
+    private fun canSetText(node: AccessibilityNodeInfo): Boolean {
+        return node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_SET_TEXT }
     }
 
     private fun isShopeeNode(node: AccessibilityNodeInfo): Boolean {
