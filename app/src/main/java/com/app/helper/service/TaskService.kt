@@ -24,7 +24,6 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.app.helper.R
-import com.app.helper.network.ApiConfig
 import com.app.helper.network.ApiService
 import com.app.helper.network.Api2TaskInfo
 import com.app.helper.util.TokenManager
@@ -261,6 +260,10 @@ class TaskService : android.app.Service() {
             stopAutoForDeviceBlock()
             return
         }
+        if (!ChatTaskAccessibilityService.isEnabled) {
+            updateFloatStatus("请先开启【格界聊天任务辅助】，并手动打开聊天页面")
+            return
+        }
         if (isAutoRunning) {
             isAutoRunning = false
             countdownJob?.cancel()
@@ -327,6 +330,15 @@ class TaskService : android.app.Service() {
             stopAutoForDeviceBlock()
             return
         }
+        if (!ChatTaskAccessibilityService.isEnabled) {
+            isAutoRunning = false
+            handler.post {
+                tvAction?.text = "一键做任务"
+                tvAction?.setBackgroundResource(R.drawable.bg_float_action)
+            }
+            updateFloatStatus("请先开启【格界聊天任务辅助】，并手动打开聊天页面")
+            return
+        }
         serviceScope.launch {
             sendHeartbeat()
             if (!deviceAllowed) return@launch
@@ -361,7 +373,7 @@ class TaskService : android.app.Service() {
                 updateFloatStatus("已领取任务\nshop=$currentShopId item=$currentItemId")
                 broadcastStats()
                 delay(800)
-                launchShopeeProduct()
+                if (!openTaskUrlInChat()) return@launch
 
                 updateFloatStatus("等待数据回传...")
                 if (!waitForFileContent()) return@launch
@@ -403,7 +415,7 @@ class TaskService : android.app.Service() {
                 updateFloatStatus("已领取任务\nshop=$currentShopId item=$currentItemId")
                 broadcastStats()
                 delay(800)
-                launchShopeeProduct()
+                if (!openTaskUrlInChat()) return@launch
 
                 updateFloatStatus("等待数据回传...")
                 if (!waitForFileContent()) return@launch
@@ -423,27 +435,24 @@ class TaskService : android.app.Service() {
         }
     }
 
-    private suspend fun launchShopeeProduct() {
+    private suspend fun openTaskUrlInChat(): Boolean {
         val productUrl = "https://shopee.tw/product/$currentShopId/$currentItemId"
-        val wakeIntent = Intent(ApiConfig.WAKE_ACTION).apply {
-            setPackage(ApiConfig.TARGET_PACKAGE)
-            putExtra("url", productUrl)
-        }
-        sendBroadcast(wakeIntent)
-        Log.d(TAG, "Wake broadcast: $productUrl")
-        delay(1000)
-        try {
-            val launchIntent = Intent(Intent.ACTION_VIEW).apply {
-                data = Uri.parse(productUrl)
-                setPackage(ApiConfig.TARGET_PACKAGE)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        if (!ChatTaskAccessibilityService.isEnabled) {
+            updateFloatStatus("请先开启【格界聊天任务辅助】，并手动打开聊天页面")
+            isAutoRunning = false
+            handler.post {
+                tvAction?.text = "一键做任务"
+                tvAction?.setBackgroundResource(R.drawable.bg_float_action)
             }
-            startActivity(launchIntent)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to launch Shopee", e)
-            updateFloatStatus("启动Shopee失败: ${e.message}")
-            if (isAutoRunning) startNextTaskCycle()
+            return false
         }
+        updateFloatStatus("已发送任务链接到聊天页\n请保持聊天输入框可用")
+        sendBroadcast(Intent(ChatTaskAccessibilityService.ACTION_OPEN_TASK_URL).apply {
+            putExtra(ChatTaskAccessibilityService.EXTRA_URL, productUrl)
+        })
+        Log.d(TAG, "Send task URL to chat: $productUrl")
+        delay(1200)
+        return true
     }
 
     private suspend fun waitForFileContent(): Boolean {
@@ -504,6 +513,7 @@ class TaskService : android.app.Service() {
             isUploading = false
             currentTaskId = ""
             broadcastStats()
+            returnToChatScreen()
             if (isAutoRunning && !triggerPauseRestIfNeeded()) startNextTaskCycle()
         }
     }
@@ -542,7 +552,16 @@ class TaskService : android.app.Service() {
             currentTaskId = ""
             currentApi2TaskInfo = null
             broadcastStats()
+            returnToChatScreen()
             if (isAutoRunning && !triggerPauseRestIfNeeded()) startNextTaskCycle()
+        }
+    }
+
+    private fun returnToChatScreen() {
+        try {
+            sendBroadcast(Intent(ChatTaskAccessibilityService.ACTION_RETURN_TO_CHAT))
+        } catch (e: Exception) {
+            Log.w(TAG, "Return to chat failed", e)
         }
     }
 

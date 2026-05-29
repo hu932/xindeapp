@@ -21,6 +21,7 @@ import com.app.helper.R
 import com.app.helper.databinding.ActivityMainBinding
 import com.app.helper.network.ApiService
 import com.app.helper.network.UpdateResponse
+import com.app.helper.service.ChatTaskAccessibilityService
 import com.app.helper.service.TaskService
 import com.app.helper.ui.login.LoginActivity
 import com.app.helper.util.FingerprintManager
@@ -79,8 +80,12 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnStartAuto.setOnClickListener {
             if (checkOverlayPermission()) {
+                if (!ChatTaskAccessibilityService.isEnabled) {
+                    showAccessibilityGuide()
+                    return@setOnClickListener
+                }
                 startTaskService()
-                Toast.makeText(this, "服务已启动，请使用悬浮窗操作。", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "服务已启动，请手动打开聊天页后使用悬浮窗开始。", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -617,6 +622,17 @@ class MainActivity : AppCompatActivity() {
             return false
         }
         return true
+    }
+
+    private fun showAccessibilityGuide() {
+        AlertDialog.Builder(this)
+            .setTitle("开启聊天任务辅助")
+            .setMessage("请在无障碍设置里开启【格界聊天任务辅助】。开启后手动打开聊天页面，再点击悬浮窗【一键做任务】。")
+            .setPositiveButton("去开启") { _, _ ->
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     private fun requestPermissions() {
