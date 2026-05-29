@@ -36,7 +36,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private var receiver: BroadcastReceiver? = null
     private var pendingUrl: String? = null
-    private var returnAttempts = 0
+    private var returnBackUsed = false
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -140,21 +140,19 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         val root = rootInActiveWindow ?: return
         val sendNode = findSendButton(root)
         if (sendNode != null && clickNode(sendNode)) {
-            handler.postDelayed({ clickVisibleTaskLink(url) }, 650L)
             return
         }
-        // Some chat pages turn pasted links into tappable chips before sending.
-        clickVisibleTaskLink(url)
     }
 
     private fun scheduleLinkOpenAttempts(url: String) {
-        listOf(900L, 1600L, 2600L, 3900L, 5600L).forEach { delayMs ->
+        listOf(1800L, 2600L, 3600L, 5000L).forEach { delayMs ->
             handler.postDelayed({ clickVisibleTaskLink(url) }, delayMs)
         }
     }
 
     private fun clickVisibleTaskLink(url: String): Boolean {
         val root = rootInActiveWindow ?: return false
+        if (!isProbablyChatScreen(root)) return false
         val node = findProductLinkNode(root, url) ?: return false
         return clickNode(node) || clickNodeCenter(node)
     }
@@ -209,7 +207,6 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         val needles = urlNeedles(url)
         needles.take(3).firstNotNullOfOrNull { findUrlNode(root, it) }?.let { return it }
 
-        if (!isProbablyChatScreen(root)) return null
         val idNeedles = needles.drop(3)
         if (idNeedles.isEmpty() || findUrlNode(root, "shopee") == null) return null
         return idNeedles.firstNotNullOfOrNull { findUrlNode(root, it) }
@@ -241,28 +238,32 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     }
 
     private fun returnToChatScreen() {
-        returnAttempts = 0
-        closeBlockingDialogOrGoBack()
-    }
-
-    private fun closeBlockingDialogOrGoBack() {
+        returnBackUsed = false
         val root = rootInActiveWindow
-        if (root != null && isProbablyChatScreen(root)) {
-            returnAttempts = 0
+        if (root != null && isProbablyChatScreen(root)) return
+
+        if (root != null && closeDialogButton(root)) {
+            handler.postDelayed({ singleBackToChatIfNeeded() }, 650L)
             return
         }
 
-        val handledDialog = root?.let { closeDialogButton(it) } == true
-        if (!handledDialog) {
-            performGlobalAction(GLOBAL_ACTION_BACK)
-        }
+        singleBackToChatIfNeeded()
+        handler.postDelayed({ closeDialogOnlyIfStillBlocking() }, 900L)
+    }
 
-        returnAttempts++
-        if (returnAttempts < 6) {
-            handler.postDelayed({ closeBlockingDialogOrGoBack() }, 650L)
-        } else {
-            returnAttempts = 0
+    private fun singleBackToChatIfNeeded() {
+        if (returnBackUsed) return
+        val root = rootInActiveWindow
+        if (root != null && isProbablyChatScreen(root)) {
+            return
         }
+        returnBackUsed = true
+        performGlobalAction(GLOBAL_ACTION_BACK)
+    }
+
+    private fun closeDialogOnlyIfStillBlocking() {
+        val root = rootInActiveWindow ?: return
+        if (!isProbablyChatScreen(root)) closeDialogButton(root)
     }
 
     private fun isProbablyChatScreen(root: AccessibilityNodeInfo): Boolean {
