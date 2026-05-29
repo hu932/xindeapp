@@ -514,6 +514,7 @@ class TaskService : android.app.Service() {
             currentTaskId = ""
             broadcastStats()
             returnToChatScreen()
+            delay(3_200L)
             if (isAutoRunning && !triggerPauseRestIfNeeded()) startNextTaskCycle()
         }
     }
@@ -553,6 +554,7 @@ class TaskService : android.app.Service() {
             currentApi2TaskInfo = null
             broadcastStats()
             returnToChatScreen()
+            delay(3_200L)
             if (isAutoRunning && !triggerPauseRestIfNeeded()) startNextTaskCycle()
         }
     }
