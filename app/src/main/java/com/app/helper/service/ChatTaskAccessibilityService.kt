@@ -26,6 +26,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         private const val TAG = "ChatTaskAccessibility"
         const val ACTION_OPEN_TASK_URL = "com.app.helper.OPEN_TASK_URL_IN_CHAT"
         const val ACTION_RETURN_TO_CHAT = "com.app.helper.RETURN_TO_CHAT"
+        const val ACTION_PRODUCT_BLOCKED = "com.app.helper.PRODUCT_BLOCKED"
         const val EXTRA_URL = "url"
 
         @Volatile
@@ -66,6 +67,14 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         if (pendingUrl != null) {
             handler.removeCallbacksAndMessages(null)
             handler.postDelayed({ runPendingUrl() }, 250L)
+            return
+        }
+
+        val root = rootInActiveWindow ?: return
+        if (containsAnyText(root, productUnavailableHints)) {
+            closeBlockingPopup(root)
+            sendBroadcast(Intent(ACTION_PRODUCT_BLOCKED))
+            handler.postDelayed({ returnToChatScreen() }, 450L)
         }
     }
 
@@ -242,7 +251,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         val root = rootInActiveWindow
         if (root != null && isProbablyChatScreen(root)) return
 
-        if (root != null && closeDialogButton(root)) {
+        if (root != null && closeBlockingPopup(root)) {
             handler.postDelayed({ singleBackToChatIfNeeded() }, 650L)
             return
         }
@@ -263,7 +272,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
 
     private fun closeDialogOnlyIfStillBlocking() {
         val root = rootInActiveWindow ?: return
-        if (!isProbablyChatScreen(root)) closeDialogButton(root)
+        if (!isProbablyChatScreen(root)) closeBlockingPopup(root)
     }
 
     private fun isProbablyChatScreen(root: AccessibilityNodeInfo): Boolean {
@@ -284,6 +293,57 @@ class ChatTaskAccessibilityService : AccessibilityService() {
             if (closeDialogButton(child)) return true
         }
         return false
+    }
+
+    private fun closeBlockingPopup(root: AccessibilityNodeInfo): Boolean {
+        if (closeDialogButton(root)) return true
+        val hasKnownPopup = containsAnyText(root, productUnavailableHints) ||
+            hasShopeeRecommendPopup(root)
+        return hasKnownPopup && closeTopRightIconButton(root)
+    }
+
+    private fun hasShopeeRecommendPopup(root: AccessibilityNodeInfo): Boolean {
+        val hasMallTab = containsAnyText(root, shopeeMallHints)
+        val hasPaymentTab = containsAnyText(root, shopeePaymentHints)
+        return hasMallTab && hasPaymentTab
+    }
+
+    private fun closeTopRightIconButton(node: AccessibilityNodeInfo): Boolean {
+        val display = resources.displayMetrics
+        val screenWidth = display.widthPixels
+        val screenHeight = display.heightPixels
+        findTopRightIconButton(node, screenWidth, screenHeight)?.let {
+            return clickNode(it) || clickNodeCenter(it)
+        }
+        return false
+    }
+
+    private fun findTopRightIconButton(
+        node: AccessibilityNodeInfo,
+        screenWidth: Int,
+        screenHeight: Int
+    ): AccessibilityNodeInfo? {
+        val rect = Rect()
+        node.getBoundsInScreen(rect)
+        val label = (node.text ?: node.contentDescription)?.toString()?.trim().orEmpty()
+        val viewId = node.viewIdResourceName.orEmpty().lowercase()
+        val smallIcon = rect.width() in 18..96 && rect.height() in 18..96
+        val minX = (screenWidth * 0.55f).toInt()
+        val minY = (screenHeight * 0.05f).toInt()
+        val maxY = (screenHeight * 0.32f).toInt()
+        val inPopupCloseArea = rect.centerX() > minX &&
+            rect.centerY() in minY..maxY
+        if (node.isEnabled && (node.isClickable || node.isFocusable) &&
+            smallIcon && inPopupCloseArea &&
+            (label.isBlank() || label in dialogCloseLabels || viewId.contains("close"))
+        ) {
+            return node
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            findTopRightIconButton(child, screenWidth, screenHeight)?.let { return it }
+        }
+        return null
     }
 
     private fun containsAnyText(node: AccessibilityNodeInfo, needles: Set<String>): Boolean {
@@ -316,4 +376,15 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     private val chatHints = setOf(
         "发送", "傳送", "输入", "輸入", "消息", "訊息", "message", "Message", "chat", "Chat"
     )
+
+    private val productUnavailableHints = setOf(
+        "商品不存在", "商品不存在或已下架", "商品已下架", "商品未找到", "找不到商品",
+        "產品不存在", "產品已下架", "賣場不存在", "商品不存在或已被移除",
+        "Product not found", "product not found", "product does not exist",
+        "This product does not exist", "unavailable", "Unavailable"
+    )
+
+    private val shopeeMallHints = setOf("蝦皮商城", "虾皮商城")
+
+    private val shopeePaymentHints = setOf("貨到付款", "货到付款")
 }

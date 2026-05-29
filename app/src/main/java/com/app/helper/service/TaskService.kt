@@ -82,6 +82,7 @@ class TaskService : android.app.Service() {
 
     private var receiver: BroadcastReceiver? = null
     @Volatile private var pendingFileContent: String? = null
+    @Volatile private var pendingProductBlocked = false
     private var currentApi2TaskInfo: Api2TaskInfo? = null
 
     private val prefs by lazy { getSharedPreferences(PREF_NAME, MODE_PRIVATE) }
@@ -369,6 +370,7 @@ class TaskService : android.app.Service() {
                 currentItemId = task.parseItemId()
                 currentApi2TaskInfo = null
                 pendingFileContent = null
+                pendingProductBlocked = false
 
                 updateFloatStatus("已领取任务\nshop=$currentShopId item=$currentItemId")
                 broadcastStats()
@@ -411,6 +413,7 @@ class TaskService : android.app.Service() {
                 currentItemId = taskData.parseItemId()
                 currentTaskId = taskData.task?.id ?: ""
                 pendingFileContent = null
+                pendingProductBlocked = false
 
                 updateFloatStatus("已领取任务\nshop=$currentShopId item=$currentItemId")
                 broadcastStats()
@@ -462,6 +465,14 @@ class TaskService : android.app.Service() {
             if (pendingFileContent != null) {
                 consecutiveTimeouts = 0
                 return true
+            }
+            if (pendingProductBlocked) {
+                pendingProductBlocked = false
+                consecutiveTimeouts = 0
+                updateFloatStatus("商品不存在或已下架，跳过当前任务")
+                returnToChatScreen()
+                if (isAutoRunning) startNextTaskCycle(forceDelaySec = 1)
+                return false
             }
             delay(500)
         }
@@ -731,6 +742,10 @@ class TaskService : android.app.Service() {
                             Log.d(TAG, "Data file read: ${content.length} bytes")
                         }
                     }
+                    ChatTaskAccessibilityService.ACTION_PRODUCT_BLOCKED -> {
+                        pendingProductBlocked = true
+                        Log.d(TAG, "Product unavailable popup detected")
+                    }
                     "com.app.helper.TOAST_ACTION" -> {
                         val msg = intent.getStringExtra("extra_data") ?: ""
                         if (msg.isNotEmpty()) updateFloatStatus(msg)
@@ -762,6 +777,7 @@ class TaskService : android.app.Service() {
             addAction("com.app.helper.LOGS_ACTION")
             addAction("com.app.helper.SHOW_FLOAT_ACTION")
             addAction("com.app.helper.STATS_QUERY")
+            addAction(ChatTaskAccessibilityService.ACTION_PRODUCT_BLOCKED)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(receiver, filter, RECEIVER_EXPORTED)
