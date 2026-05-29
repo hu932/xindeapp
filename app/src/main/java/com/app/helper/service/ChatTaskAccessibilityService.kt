@@ -38,6 +38,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     private var receiver: BroadcastReceiver? = null
     private var pendingUrl: String? = null
     private var returnBackUsed = false
+    private var lastPopupCloseAt = 0L
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -74,7 +75,12 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         if (containsAnyText(root, productUnavailableHints)) {
             closeBlockingPopup(root)
             sendBroadcast(Intent(ACTION_PRODUCT_BLOCKED))
-            handler.postDelayed({ returnToChatScreen() }, 450L)
+            handler.postDelayed({ returnToChatScreen() }, 1_400L)
+            return
+        }
+
+        if (hasShopeeRecommendPopup(root)) {
+            closeBlockingPopup(root)
         }
     }
 
@@ -237,8 +243,10 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         val rect = Rect()
         node.getBoundsInScreen(rect)
         if (rect.width() <= 0 || rect.height() <= 0) return false
-        val x = rect.centerX().toFloat()
-        val y = rect.centerY().toFloat()
+        return tapPoint(rect.centerX().toFloat(), rect.centerY().toFloat())
+    }
+
+    private fun tapPoint(x: Float, y: Float): Boolean {
         val path = Path().apply { moveTo(x, y) }
         val gesture = GestureDescription.Builder()
             .addStroke(GestureDescription.StrokeDescription(path, 0L, 80L))
@@ -252,12 +260,12 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         if (root != null && isProbablyChatScreen(root)) return
 
         if (root != null && closeBlockingPopup(root)) {
-            handler.postDelayed({ singleBackToChatIfNeeded() }, 650L)
+            handler.postDelayed({ singleBackToChatIfNeeded() }, 1_400L)
             return
         }
 
         singleBackToChatIfNeeded()
-        handler.postDelayed({ closeDialogOnlyIfStillBlocking() }, 900L)
+        handler.postDelayed({ closeDialogOnlyIfStillBlocking() }, 1_400L)
     }
 
     private fun singleBackToChatIfNeeded() {
@@ -296,10 +304,17 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     }
 
     private fun closeBlockingPopup(root: AccessibilityNodeInfo): Boolean {
+        val now = System.currentTimeMillis()
+        if (now - lastPopupCloseAt < 900L) return true
+
         if (closeDialogButton(root)) return true
         val hasKnownPopup = containsAnyText(root, productUnavailableHints) ||
             hasShopeeRecommendPopup(root)
-        return hasKnownPopup && closeTopRightIconButton(root)
+        if (!hasKnownPopup) return false
+
+        val closed = closeTopRightIconButton(root) || tapShopeePopupClosePoint()
+        if (closed) lastPopupCloseAt = now
+        return closed
     }
 
     private fun hasShopeeRecommendPopup(root: AccessibilityNodeInfo): Boolean {
@@ -316,6 +331,13 @@ class ChatTaskAccessibilityService : AccessibilityService() {
             return clickNode(it) || clickNodeCenter(it)
         }
         return false
+    }
+
+    private fun tapShopeePopupClosePoint(): Boolean {
+        val display = resources.displayMetrics
+        val x = display.widthPixels * 0.855f
+        val y = display.heightPixels * 0.16f
+        return tapPoint(x, y)
     }
 
     private fun findTopRightIconButton(
