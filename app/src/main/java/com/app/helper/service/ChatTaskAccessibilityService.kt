@@ -27,6 +27,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         const val ACTION_OPEN_TASK_URL = "com.app.helper.OPEN_TASK_URL_IN_CHAT"
         const val ACTION_RETURN_TO_CHAT = "com.app.helper.RETURN_TO_CHAT"
         const val ACTION_CANCEL_CHAT_TASK = "com.app.helper.CANCEL_CHAT_TASK"
+        const val ACTION_CHAT_READY = "com.app.helper.CHAT_READY"
         const val ACTION_PRODUCT_BLOCKED = "com.app.helper.PRODUCT_BLOCKED"
         const val EXTRA_URL = "url"
 
@@ -40,7 +41,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     private val linkAttemptRunnables = mutableListOf<Runnable>()
     private var receiver: BroadcastReceiver? = null
     private var pendingUrl: String? = null
-    private var returnBackUsed = false
+    private var returnAttempts = 0
     private var lastPopupCloseAt = 0L
 
     override fun onServiceConnected() {
@@ -286,44 +287,47 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     }
 
     private fun returnToChatScreen() {
-        returnBackUsed = false
-        val root = activeContentRoot()
-        if (root != null && isProbablyChatScreen(root)) return
-
-        if (root != null && closeBlockingPopup(root)) {
-            handler.postDelayed({ singleBackToChatIfNeeded() }, 1_400L)
-            return
-        }
-
-        singleBackToChatIfNeeded()
-        handler.postDelayed({ closeDialogOnlyIfStillBlocking() }, 1_400L)
+        returnAttempts = 0
+        stepReturnToChat()
     }
 
-    private fun singleBackToChatIfNeeded() {
-        if (returnBackUsed) return
+    private fun stepReturnToChat() {
         val root = activeContentRoot()
         if (root != null && isProbablyChatScreen(root)) {
+            sendBroadcast(Intent(ACTION_CHAT_READY))
             return
         }
-        returnBackUsed = true
-        performGlobalAction(GLOBAL_ACTION_BACK)
-    }
 
-    private fun closeDialogOnlyIfStillBlocking() {
-        val root = activeContentRoot() ?: return
-        if (!isProbablyChatScreen(root)) closeBlockingPopup(root)
+        if (root != null && closeBlockingPopup(root)) {
+            handler.postDelayed({ stepReturnToChat() }, 1_200L)
+            return
+        }
+
+        if (returnAttempts >= 4) {
+            Log.w(TAG, "Return to chat stopped after $returnAttempts attempts")
+            return
+        }
+
+        val shouldBack = root == null ||
+            returnAttempts == 0 ||
+            isShopeeNode(root) ||
+            isLikelyProductPage(root) ||
+            containsAnyText(root, productUnavailableHints)
+        if (!shouldBack) return
+
+        returnAttempts++
+        performGlobalAction(GLOBAL_ACTION_BACK)
+        handler.postDelayed({ stepReturnToChat() }, 1_000L)
     }
 
     private fun activeContentRoot(): AccessibilityNodeInfo? {
-        val allRoots = windows
-            ?.asSequence()
-            ?.mapNotNull { it.root }
-            ?.filter { !isOwnAppNode(it) }
-            ?.toList()
-            .orEmpty()
+        val visibleWindows = windows.orEmpty()
+            .filter { it.root != null && !isOwnAppNode(it.root) }
 
-        allRoots.firstOrNull { isShopeeNode(it) }?.let { return it }
-        allRoots.firstOrNull()?.let { return it }
+        visibleWindows.firstOrNull { it.isActive && isShopeeNode(it.root) }?.root?.let { return it }
+        visibleWindows.firstOrNull { it.isFocused && isShopeeNode(it.root) }?.root?.let { return it }
+        visibleWindows.firstOrNull { isShopeeNode(it.root) }?.root?.let { return it }
+        visibleWindows.firstOrNull()?.root?.let { return it }
         return rootInActiveWindow?.takeUnless { isOwnAppNode(it) }
     }
 
@@ -370,6 +374,13 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         val hasMallTab = containsAnyText(root, shopeeMallHints)
         val hasPaymentTab = containsAnyText(root, shopeePaymentHints)
         return hasMallTab && hasPaymentTab
+    }
+
+    private fun isLikelyProductPage(root: AccessibilityNodeInfo): Boolean {
+        if (!isShopeeNode(root) || isProbablyChatScreen(root)) return false
+        return containsAnyText(root, productPageHints) ||
+            hasShopeeRecommendPopup(root) ||
+            containsAnyText(root, productUnavailableHints)
     }
 
     private fun closeTopRightIconButton(node: AccessibilityNodeInfo): Boolean {
@@ -486,6 +497,13 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         "產品不存在", "產品已下架", "賣場不存在", "商品不存在或已被移除",
         "Product not found", "product not found", "product does not exist",
         "This product does not exist", "unavailable", "Unavailable"
+    )
+
+    private val productPageHints = setOf(
+        "立即購買", "立即购买", "加入購物車", "加入购物车", "購物車", "购物车",
+        "商品詳情", "商品详情", "商品評價", "商品评价", "評價", "评价",
+        "已售出", "已售", "規格", "规格", "運送", "运送", "賣場", "卖场",
+        "Buy Now", "Add to Cart", "Product Details", "Product Ratings"
     )
 
     private val shopeeMallHints = setOf("蝦皮商城", "虾皮商城")

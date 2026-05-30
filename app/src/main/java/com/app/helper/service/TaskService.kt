@@ -40,7 +40,8 @@ class TaskService : android.app.Service() {
         private const val CHANNEL_ID = "app_service_channel"
         private const val NOTIFICATION_ID = 1001
         private const val PREF_NAME = "task_config"
-        private const val RETURN_SETTLE_DELAY_MS = 2_500L
+        private const val RETURN_SETTLE_DELAY_MS = 3_000L
+        private const val RETURN_READY_TIMEOUT_MS = 7_000L
         var isRunning = false
             private set
     }
@@ -84,6 +85,7 @@ class TaskService : android.app.Service() {
     private var receiver: BroadcastReceiver? = null
     @Volatile private var pendingFileContent: String? = null
     @Volatile private var pendingProductBlocked = false
+    @Volatile private var chatReadyAt = 0L
     private var currentApi2TaskInfo: Api2TaskInfo? = null
 
     private val prefs by lazy { getSharedPreferences(PREF_NAME, MODE_PRIVATE) }
@@ -485,8 +487,8 @@ class TaskService : android.app.Service() {
                 pendingProductBlocked = false
                 consecutiveTimeouts = 0
                 updateFloatStatus("商品不存在或已下架，跳过当前任务")
-                returnToChatScreen()
-                if (isAutoRunning) startNextTaskCycle(forceDelaySec = 1)
+                val waitedMs = returnToChatScreenAndWait()
+                if (isAutoRunning) startNextTaskCycle(forceDelaySec = 1, alreadyWaitedMs = waitedMs)
                 return false
             }
             delay(500)
@@ -540,10 +542,9 @@ class TaskService : android.app.Service() {
             isUploading = false
             currentTaskId = ""
             broadcastStats()
-            returnToChatScreen()
-            delay(RETURN_SETTLE_DELAY_MS)
+            val waitedMs = returnToChatScreenAndWait()
             if (isAutoRunning && !triggerPauseRestIfNeeded()) {
-                startNextTaskCycle(alreadyWaitedMs = RETURN_SETTLE_DELAY_MS)
+                startNextTaskCycle(alreadyWaitedMs = waitedMs)
             }
         }
     }
@@ -582,10 +583,9 @@ class TaskService : android.app.Service() {
             currentTaskId = ""
             currentApi2TaskInfo = null
             broadcastStats()
-            returnToChatScreen()
-            delay(RETURN_SETTLE_DELAY_MS)
+            val waitedMs = returnToChatScreenAndWait()
             if (isAutoRunning && !triggerPauseRestIfNeeded()) {
-                startNextTaskCycle(alreadyWaitedMs = RETURN_SETTLE_DELAY_MS)
+                startNextTaskCycle(alreadyWaitedMs = waitedMs)
             }
         }
     }
@@ -596,6 +596,18 @@ class TaskService : android.app.Service() {
         } catch (e: Exception) {
             Log.w(TAG, "Return to chat failed", e)
         }
+    }
+
+    private suspend fun returnToChatScreenAndWait(): Long {
+        val start = System.currentTimeMillis()
+        chatReadyAt = 0L
+        returnToChatScreen()
+        delay(RETURN_SETTLE_DELAY_MS)
+        while (System.currentTimeMillis() - start < RETURN_READY_TIMEOUT_MS) {
+            if (chatReadyAt >= start) break
+            delay(250L)
+        }
+        return System.currentTimeMillis() - start
     }
 
     private fun triggerPauseRestIfNeeded(): Boolean {
@@ -775,6 +787,10 @@ class TaskService : android.app.Service() {
                         pendingProductBlocked = true
                         Log.d(TAG, "Product unavailable popup detected")
                     }
+                    ChatTaskAccessibilityService.ACTION_CHAT_READY -> {
+                        chatReadyAt = System.currentTimeMillis()
+                        Log.d(TAG, "Chat screen ready")
+                    }
                     "com.app.helper.TOAST_ACTION" -> {
                         val msg = intent.getStringExtra("extra_data") ?: ""
                         if (msg.isNotEmpty()) updateFloatStatus(msg)
@@ -807,6 +823,7 @@ class TaskService : android.app.Service() {
             addAction("com.app.helper.SHOW_FLOAT_ACTION")
             addAction("com.app.helper.STATS_QUERY")
             addAction(ChatTaskAccessibilityService.ACTION_PRODUCT_BLOCKED)
+            addAction(ChatTaskAccessibilityService.ACTION_CHAT_READY)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(receiver, filter, RECEIVER_EXPORTED)
