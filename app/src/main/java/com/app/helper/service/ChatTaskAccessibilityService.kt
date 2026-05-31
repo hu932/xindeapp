@@ -27,6 +27,8 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         private const val MAX_RETURN_ATTEMPTS = 8
         private const val RETURN_STEP_DELAY_MS = 900L
         private const val POPUP_SETTLE_DELAY_MS = 1_100L
+        private const val MAX_CHAT_INPUT_FOCUS_ATTEMPTS = 4
+        private const val CHAT_INPUT_FOCUS_RETRY_MS = 450L
         const val ACTION_OPEN_TASK_URL = "com.app.helper.OPEN_TASK_URL_IN_CHAT"
         const val ACTION_RETURN_TO_CHAT = "com.app.helper.RETURN_TO_CHAT"
         const val ACTION_CANCEL_CHAT_TASK = "com.app.helper.CANCEL_CHAT_TASK"
@@ -48,6 +50,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     private var pendingUrl: String? = null
     private var returnAttempts = 0
     private var lastPopupCloseAt = 0L
+    private var chatInputFocusAttempts = 0
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -123,6 +126,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
                             if (url.isBlank()) return@runSafely
                             cancelLinkAttempts()
                             pendingUrl = url
+                            chatInputFocusAttempts = 0
                             handler.post(runPendingUrlRunnable)
                         }
                         ACTION_RETURN_TO_CHAT -> {
@@ -154,9 +158,22 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         val root = activeContentRoot() ?: return
         val input = findEditable(root)
         if (input == null) {
+            val candidate = findChatInputCandidate(root)
+            if (candidate != null && chatInputFocusAttempts < MAX_CHAT_INPUT_FOCUS_ATTEMPTS) {
+                chatInputFocusAttempts++
+                val opened = clickNode(candidate) ||
+                    candidate.performAction(AccessibilityNodeInfo.ACTION_CLICK) ||
+                    candidate.performAction(AccessibilityNodeInfo.ACTION_FOCUS) ||
+                    clickNodeCenter(candidate)
+                if (opened) {
+                    handler.postDelayed(runPendingUrlRunnable, CHAT_INPUT_FOCUS_RETRY_MS)
+                    return
+                }
+            }
             Log.w(TAG, "No editable input found")
             return
         }
+        chatInputFocusAttempts = 0
 
         if (!input.performAction(AccessibilityNodeInfo.ACTION_FOCUS)) {
             input.performAction(AccessibilityNodeInfo.ACTION_CLICK)
@@ -215,6 +232,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
 
     private fun cancelAutomation() {
         pendingUrl = null
+        chatInputFocusAttempts = 0
         handler.removeCallbacksAndMessages(null)
         cancelLinkAttempts()
     }
@@ -232,6 +250,18 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         if (hasChatContext) {
             findEditableNode(node, ::hasAnyChatInputHint)?.let { return it }
             findEditableNode(node) { true }?.let { return it }
+        }
+        return null
+    }
+
+    private fun findChatInputCandidate(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        if (isOwnAppNode(node)) return null
+        if (isNodeUsable(node) && !isSearchEditableNode(node) && hasChatInputPlaceholderHint(node)) {
+            return node
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            findChatInputCandidate(child)?.let { return it }
         }
         return null
     }
@@ -376,13 +406,17 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     }
 
     private fun isProbablyChatScreen(root: AccessibilityNodeInfo): Boolean {
-        val input = findEditable(root) ?: return false
-        return isNodeUsable(input) && isChatInputContext(root, input)
+        val input = findEditable(root)
+        if (input != null) return isNodeUsable(input) && isChatInputContext(root, input)
+        val candidate = findChatInputCandidate(root) ?: return false
+        return isChatInputContext(root, candidate)
     }
 
     private fun hasChatScreenContext(root: AccessibilityNodeInfo): Boolean {
-        val input = findEditable(root) ?: return false
-        return isChatInputContext(root, input)
+        val input = findEditable(root)
+        if (input != null) return isChatInputContext(root, input)
+        val candidate = findChatInputCandidate(root) ?: return false
+        return isChatInputContext(root, candidate)
     }
 
     private fun isChatInputContext(
@@ -408,6 +442,11 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         val inputId = node.viewIdResourceName.orEmpty().lowercase()
         return chatInputIdHints.any { inputId.contains(it) } ||
             chatInputTextHints.any { inputLabel.contains(it) }
+    }
+
+    private fun hasChatInputPlaceholderHint(node: AccessibilityNodeInfo): Boolean {
+        val inputLabel = nodeLabel(node).lowercase()
+        return chatInputPlaceholderHints.any { inputLabel.contains(it) }
     }
 
     private fun isReadyChatScreen(root: AccessibilityNodeInfo): Boolean {
@@ -437,7 +476,17 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         val hasRecommendPopup = hasShopeeRecommendPopup(root)
         if (!hasUnavailablePopup && !hasRecommendPopup) return false
 
+        if (hasUnavailablePopup && clickActionButtonByLabels(root, productUnavailableActionLabels)) {
+            lastPopupCloseAt = now
+            return true
+        }
+
         if (hasUnavailablePopup && closeDialogButton(root)) {
+            lastPopupCloseAt = now
+            return true
+        }
+
+        if (hasUnavailablePopup && performGlobalAction(GLOBAL_ACTION_BACK)) {
             lastPopupCloseAt = now
             return true
         }
@@ -445,6 +494,22 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         val closed = closeTopRightIconButton(root) || tapShopeePopupClosePoint()
         if (closed) lastPopupCloseAt = now
         return closed
+    }
+
+    private fun clickActionButtonByLabels(
+        node: AccessibilityNodeInfo,
+        labels: Set<String>
+    ): Boolean {
+        if (isOwnAppNode(node)) return false
+        val label = nodeLabel(node)
+        if (isNodeUsable(node) && labels.any { label.contains(it, ignoreCase = true) }) {
+            return clickNode(node) || clickNodeCenter(node)
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            if (clickActionButtonByLabels(child, labels)) return true
+        }
+        return false
     }
 
     private fun hasBlockingPopup(root: AccessibilityNodeInfo): Boolean {
@@ -631,6 +696,12 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         "輸入", "输入", "訊息", "消息", "私訊", "私信", "message", "chat"
     )
 
+    private val chatInputPlaceholderHints = listOf(
+        "輸入私訊", "输入私信", "輸入訊息", "输入讯息", "輸入消息", "输入消息",
+        "輸入訊息內容", "输入消息内容", "傳送訊息", "发送消息",
+        "type a message", "write a message", "enter message"
+    )
+
     private val searchInputHints = listOf(
         "搜尋", "搜寻", "搜索", "search", "keyword", "關鍵字", "关键字", "找商品"
     )
@@ -648,10 +719,16 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     )
 
     private val productUnavailableHints = setOf(
-        "商品不存在", "商品不存在或已下架", "商品已下架", "商品未找到", "找不到商品",
+        "你尋找的商品已不存在", "你寻找的商品已不存在", "商品不存在", "商品不存在或已下架",
+        "商品已下架", "商品未找到", "找不到商品",
         "產品不存在", "產品已下架", "賣場不存在", "商品不存在或已被移除",
         "Product not found", "product not found", "product does not exist",
         "This product does not exist", "unavailable", "Unavailable"
+    )
+
+    private val productUnavailableActionLabels = setOf(
+        "回到上一步", "返回上一步", "回上一頁", "回上一页", "返回上一頁", "返回上一页",
+        "回去", "Go back", "go back", "Return to previous page", "return to previous page"
     )
 
     private val productPageHints = setOf(
