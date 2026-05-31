@@ -42,7 +42,7 @@ class TaskService : android.app.Service() {
         private const val PREF_NAME = "task_config"
         private const val UPLOAD_SUCCESS_RETURN_DELAY_MS = 2_000L
         private const val RETURN_SETTLE_DELAY_MS = 3_000L
-        private const val RETURN_READY_TIMEOUT_MS = 7_000L
+        private const val RETURN_READY_TIMEOUT_MS = 15_000L
         var isRunning = false
             private set
     }
