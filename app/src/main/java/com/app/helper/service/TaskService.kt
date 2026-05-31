@@ -40,11 +40,17 @@ class TaskService : android.app.Service() {
         private const val CHANNEL_ID = "app_service_channel"
         private const val NOTIFICATION_ID = 1001
         private const val PREF_NAME = "task_config"
+        private const val UPLOAD_SUCCESS_RETURN_DELAY_MS = 2_000L
         private const val RETURN_SETTLE_DELAY_MS = 3_000L
         private const val RETURN_READY_TIMEOUT_MS = 7_000L
         var isRunning = false
             private set
     }
+
+    private data class ReturnToChatResult(
+        val waitedMs: Long,
+        val ready: Boolean
+    )
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val handler = Handler(Looper.getMainLooper())
@@ -487,8 +493,10 @@ class TaskService : android.app.Service() {
                 pendingProductBlocked = false
                 consecutiveTimeouts = 0
                 updateFloatStatus("商品不存在或已下架，跳过当前任务")
-                val waitedMs = returnToChatScreenAndWait()
-                if (isAutoRunning) startNextTaskCycle(forceDelaySec = 1, alreadyWaitedMs = waitedMs)
+                val returnResult = returnToChatScreenAndWait()
+                if (isAutoRunning && ensureChatReadyOrPause(returnResult)) {
+                    startNextTaskCycle(forceDelaySec = 1, alreadyWaitedMs = returnResult.waitedMs)
+                }
                 return false
             }
             delay(500)
@@ -508,6 +516,7 @@ class TaskService : android.app.Service() {
     }
 
     private suspend fun submitTaskResult1(fileContent: String) {
+        var uploadSucceeded = false
         try {
             if (!deviceAllowed) {
                 stopAutoForDeviceBlock()
@@ -527,6 +536,7 @@ class TaskService : android.app.Service() {
                 deviceId = getAppDeviceId()
             )
             if (response.isApi1Success) {
+                uploadSucceeded = true
                 uploadCount++
                 sessionUploadCount++
                 updateFloatStatus("上传成功！")
@@ -542,14 +552,18 @@ class TaskService : android.app.Service() {
             isUploading = false
             currentTaskId = ""
             broadcastStats()
-            val waitedMs = returnToChatScreenAndWait()
-            if (isAutoRunning && !triggerPauseRestIfNeeded()) {
-                startNextTaskCycle(alreadyWaitedMs = waitedMs)
+            if (uploadSucceeded) {
+                delay(UPLOAD_SUCCESS_RETURN_DELAY_MS)
+            }
+            val returnResult = returnToChatScreenAndWait()
+            if (isAutoRunning && ensureChatReadyOrPause(returnResult) && !triggerPauseRestIfNeeded()) {
+                startNextTaskCycle(alreadyWaitedMs = returnResult.waitedMs)
             }
         }
     }
 
     private suspend fun submitTaskResult2(fileContent: String) {
+        var uploadSucceeded = false
         try {
             if (!deviceAllowed) {
                 stopAutoForDeviceBlock()
@@ -567,6 +581,7 @@ class TaskService : android.app.Service() {
             )
 
             if (response.isApi2Success) {
+                uploadSucceeded = true
                 uploadCount++
                 sessionUploadCount++
                 updateFloatStatus("上传成功！")
@@ -583,9 +598,12 @@ class TaskService : android.app.Service() {
             currentTaskId = ""
             currentApi2TaskInfo = null
             broadcastStats()
-            val waitedMs = returnToChatScreenAndWait()
-            if (isAutoRunning && !triggerPauseRestIfNeeded()) {
-                startNextTaskCycle(alreadyWaitedMs = waitedMs)
+            if (uploadSucceeded) {
+                delay(UPLOAD_SUCCESS_RETURN_DELAY_MS)
+            }
+            val returnResult = returnToChatScreenAndWait()
+            if (isAutoRunning && ensureChatReadyOrPause(returnResult) && !triggerPauseRestIfNeeded()) {
+                startNextTaskCycle(alreadyWaitedMs = returnResult.waitedMs)
             }
         }
     }
@@ -598,7 +616,7 @@ class TaskService : android.app.Service() {
         }
     }
 
-    private suspend fun returnToChatScreenAndWait(): Long {
+    private suspend fun returnToChatScreenAndWait(): ReturnToChatResult {
         val start = System.currentTimeMillis()
         chatReadyAt = 0L
         returnToChatScreen()
@@ -607,7 +625,23 @@ class TaskService : android.app.Service() {
             if (chatReadyAt >= start) break
             delay(250L)
         }
-        return System.currentTimeMillis() - start
+        return ReturnToChatResult(
+            waitedMs = System.currentTimeMillis() - start,
+            ready = chatReadyAt >= start
+        )
+    }
+
+    private fun ensureChatReadyOrPause(result: ReturnToChatResult): Boolean {
+        if (result.ready) return true
+        isAutoRunning = false
+        handler.post {
+            tvAction?.text = "一键做任务"
+            tvAction?.setBackgroundResource(R.drawable.bg_float_action)
+        }
+        cancelChatAutomation()
+        updateFloatStatus("未确认回到聊天输入框\n已暂停，请关闭弹窗或手动回到聊天页")
+        broadcastStats()
+        return false
     }
 
     private fun triggerPauseRestIfNeeded(): Boolean {

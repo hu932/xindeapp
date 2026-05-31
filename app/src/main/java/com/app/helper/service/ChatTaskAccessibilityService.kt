@@ -199,15 +199,24 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     }
 
     private fun findEditable(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        findEditableNode(node, ::hasStrongChatInputHint)?.let { return it }
+        val hasChatContext = containsAnyText(node, chatHints) || findChatSendButton(node) != null
+        if (hasChatContext) {
+            findEditableNode(node, ::hasAnyChatInputHint)?.let { return it }
+            findEditableNode(node) { true }?.let { return it }
+        }
+        return null
+    }
+
+    private fun findEditableNode(
+        node: AccessibilityNodeInfo,
+        accept: (AccessibilityNodeInfo) -> Boolean
+    ): AccessibilityNodeInfo? {
         if (isOwnAppNode(node)) return null
-        val viewId = node.viewIdResourceName.orEmpty().lowercase()
-        val label = nodeLabel(node).lowercase()
-        if (node.isEnabled && isRealEditableNode(node)) return node
-        if (node.isEnabled && canSetText(node) && chatInputIdHints.any { viewId.contains(it) }) return node
-        if (node.isEnabled && canSetText(node) && chatInputTextHints.any { label.contains(it) }) return node
+        if (node.isEnabled && isRealEditableNode(node) && accept(node)) return node
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
-            findEditable(child)?.let { return it }
+            findEditableNode(child, accept)?.let { return it }
         }
         return null
     }
@@ -293,13 +302,19 @@ class ChatTaskAccessibilityService : AccessibilityService() {
 
     private fun stepReturnToChat() {
         val root = activeContentRoot()
-        if (root != null && isProbablyChatScreen(root)) {
+        if (root != null && closeBlockingPopup(root)) {
+            handler.postDelayed({ stepReturnToChat() }, 1_200L)
+            return
+        }
+
+        val hasChatContext = root != null && hasChatScreenContext(root)
+        if (root != null && isReadyChatScreen(root)) {
             sendBroadcast(Intent(ACTION_CHAT_READY))
             return
         }
 
-        if (root != null && closeBlockingPopup(root)) {
-            handler.postDelayed({ stepReturnToChat() }, 1_200L)
+        if (hasChatContext) {
+            Log.w(TAG, "Chat screen found but input is not ready")
             return
         }
 
@@ -309,8 +324,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         }
 
         val shouldBack = root == null ||
-            returnAttempts == 0 ||
-            isShopeeNode(root) ||
+            (returnAttempts == 0 && root != null && isShopeeNode(root)) ||
             isLikelyProductPage(root) ||
             containsAnyText(root, productUnavailableHints)
         if (!shouldBack) return
@@ -333,12 +347,41 @@ class ChatTaskAccessibilityService : AccessibilityService() {
 
     private fun isProbablyChatScreen(root: AccessibilityNodeInfo): Boolean {
         val input = findEditable(root) ?: return false
-        if (findSendButton(root) != null) return true
-        val inputLabel = nodeLabel(input).lowercase()
-        val inputId = input.viewIdResourceName.orEmpty().lowercase()
-        val looksLikeChatInput = chatInputIdHints.any { inputId.contains(it) } ||
+        return isNodeUsable(input) && isChatInputContext(root, input)
+    }
+
+    private fun hasChatScreenContext(root: AccessibilityNodeInfo): Boolean {
+        val input = findEditable(root) ?: return false
+        return isChatInputContext(root, input)
+    }
+
+    private fun isChatInputContext(
+        root: AccessibilityNodeInfo,
+        input: AccessibilityNodeInfo
+    ): Boolean {
+        val strongInputId = hasStrongChatInputHint(input)
+        val hintedInput = hasAnyChatInputHint(input)
+        val hasChatText = containsAnyText(root, chatHints)
+        val hasSendButton = findChatSendButton(root) != null
+        return strongInputId || (hintedInput && (hasChatText || hasSendButton))
+    }
+
+    private fun hasStrongChatInputHint(node: AccessibilityNodeInfo): Boolean {
+        val inputLabel = nodeLabel(node).lowercase()
+        val inputId = node.viewIdResourceName.orEmpty().lowercase()
+        return chatStrongInputIdHints.any { inputId.contains(it) } ||
+            chatStrongInputTextHints.any { inputLabel.contains(it) }
+    }
+
+    private fun hasAnyChatInputHint(node: AccessibilityNodeInfo): Boolean {
+        val inputLabel = nodeLabel(node).lowercase()
+        val inputId = node.viewIdResourceName.orEmpty().lowercase()
+        return chatInputIdHints.any { inputId.contains(it) } ||
             chatInputTextHints.any { inputLabel.contains(it) }
-        return looksLikeChatInput && containsAnyText(root, chatHints)
+    }
+
+    private fun isReadyChatScreen(root: AccessibilityNodeInfo): Boolean {
+        return isProbablyChatScreen(root) && !hasBlockingPopup(root)
     }
 
     private fun closeDialogButton(node: AccessibilityNodeInfo): Boolean {
@@ -360,20 +403,35 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         val now = System.currentTimeMillis()
         if (now - lastPopupCloseAt < 900L) return true
 
-        if (closeDialogButton(root)) return true
-        val hasKnownPopup = containsAnyText(root, productUnavailableHints) ||
-            hasShopeeRecommendPopup(root)
-        if (!hasKnownPopup) return false
+        val hasUnavailablePopup = containsAnyText(root, productUnavailableHints)
+        val hasRecommendPopup = hasShopeeRecommendPopup(root)
+        if (!hasUnavailablePopup && !hasRecommendPopup) return false
+
+        if (hasUnavailablePopup && closeDialogButton(root)) {
+            lastPopupCloseAt = now
+            return true
+        }
 
         val closed = closeTopRightIconButton(root) || tapShopeePopupClosePoint()
         if (closed) lastPopupCloseAt = now
         return closed
     }
 
+    private fun hasBlockingPopup(root: AccessibilityNodeInfo): Boolean {
+        return containsAnyText(root, productUnavailableHints) ||
+            hasShopeeRecommendPopup(root)
+    }
+
     private fun hasShopeeRecommendPopup(root: AccessibilityNodeInfo): Boolean {
+        val display = resources.displayMetrics
+        val hasCloseButton = findTopRightIconButton(root, display.widthPixels, display.heightPixels) != null
+        if (!hasCloseButton) return false
+
         val hasMallTab = containsAnyText(root, shopeeMallHints)
         val hasPaymentTab = containsAnyText(root, shopeePaymentHints)
-        return hasMallTab && hasPaymentTab
+        if (hasMallTab && hasPaymentTab) return true
+        if (!containsAnyTextNearTop(root, shopeeRecommendPopupHints)) return false
+        return true
     }
 
     private fun isLikelyProductPage(root: AccessibilityNodeInfo): Boolean {
@@ -439,6 +497,20 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         return false
     }
 
+    private fun containsAnyTextNearTop(node: AccessibilityNodeInfo, needles: Set<String>): Boolean {
+        if (isOwnAppNode(node)) return false
+        val rect = Rect()
+        node.getBoundsInScreen(rect)
+        val maxY = (resources.displayMetrics.heightPixels * 0.45f).toInt()
+        val text = nodeLabel(node)
+        if (rect.top in 0..maxY && needles.any { text.contains(it, ignoreCase = true) }) return true
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            if (containsAnyTextNearTop(child, needles)) return true
+        }
+        return false
+    }
+
     private fun isOwnAppNode(node: AccessibilityNodeInfo): Boolean {
         return node.packageName?.toString() == packageName
     }
@@ -449,6 +521,29 @@ class ChatTaskAccessibilityService : AccessibilityService() {
 
     private fun canSetText(node: AccessibilityNodeInfo): Boolean {
         return node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_SET_TEXT }
+    }
+
+    private fun findChatSendButton(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        if (isOwnAppNode(node)) return null
+        val label = nodeLabel(node)
+        val viewId = node.viewIdResourceName.orEmpty().lowercase()
+        if (node.isEnabled && (node.isClickable || node.isFocusable)) {
+            if (chatSendLabels.any { label.equals(it, ignoreCase = true) } ||
+                chatSendIdHints.any { viewId.contains(it) }
+            ) return node
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            findChatSendButton(child)?.let { return it }
+        }
+        return null
+    }
+
+    private fun isNodeUsable(node: AccessibilityNodeInfo): Boolean {
+        if (!node.isEnabled || !node.isVisibleToUser) return false
+        val rect = Rect()
+        node.getBoundsInScreen(rect)
+        return rect.width() > 0 && rect.height() > 0
     }
 
     private fun isShopeeNode(node: AccessibilityNodeInfo): Boolean {
@@ -472,8 +567,22 @@ class ChatTaskAccessibilityService : AccessibilityService() {
 
     private val sendIdHints = listOf("send", "submit", "enter", "go")
 
+    private val chatSendLabels = setOf(
+        "发送", "送出", "傳送", "传送", "Send", "send"
+    )
+
+    private val chatSendIdHints = listOf("send")
+
     private val chatInputIdHints = listOf(
         "input", "edit", "message", "chat", "compose", "edt"
+    )
+
+    private val chatStrongInputIdHints = listOf(
+        "message", "chat", "compose"
+    )
+
+    private val chatStrongInputTextHints = listOf(
+        "訊息", "消息", "私訊", "私信", "message", "chat"
     )
 
     private val chatInputTextHints = listOf(
@@ -489,7 +598,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     private val dialogCloseIdHints = listOf("close", "cancel", "dismiss")
 
     private val chatHints = setOf(
-        "发送", "傳送", "输入", "輸入", "消息", "訊息", "message", "Message", "chat", "Chat"
+        "发送", "傳送", "消息", "訊息", "message", "Message", "chat", "Chat"
     )
 
     private val productUnavailableHints = setOf(
@@ -509,4 +618,10 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     private val shopeeMallHints = setOf("蝦皮商城", "虾皮商城")
 
     private val shopeePaymentHints = setOf("貨到付款", "货到付款")
+
+    private val shopeeRecommendPopupHints = setOf(
+        "為你推薦", "为你推荐", "推薦商品", "推荐商品", "相關商品", "相关商品",
+        "相似商品", "你可能也喜歡", "你可能也喜欢", "猜你喜歡", "猜你喜欢",
+        "Recommended", "recommend", "Similar", "You may also like"
+    )
 }
