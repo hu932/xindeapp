@@ -372,7 +372,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         }
 
         val hasChatContext = root != null && hasChatScreenContext(root)
-        if (root != null && isReadyChatScreen(root)) {
+        if (root != null && isReturnReadyChatScreen(root)) {
             sendBroadcast(Intent(ACTION_CHAT_READY))
             return
         }
@@ -470,6 +470,10 @@ class ChatTaskAccessibilityService : AccessibilityService() {
 
     private fun isReadyChatScreen(root: AccessibilityNodeInfo): Boolean {
         return isProbablyChatScreen(root) && !hasBlockingPopup(root)
+    }
+
+    private fun isReturnReadyChatScreen(root: AccessibilityNodeInfo): Boolean {
+        return !hasBlockingPopup(root) && (isReadyChatScreen(root) || hasChatPageSignal(root))
     }
 
     private fun closeDialogButton(node: AccessibilityNodeInfo): Boolean {

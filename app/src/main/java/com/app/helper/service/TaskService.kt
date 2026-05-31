@@ -619,11 +619,15 @@ class TaskService : android.app.Service() {
     private suspend fun returnToChatScreenAndWait(): ReturnToChatResult {
         val start = System.currentTimeMillis()
         chatReadyAt = 0L
+        updateFloatStatus("正在返回聊天页...")
         returnToChatScreen()
         delay(RETURN_SETTLE_DELAY_MS)
         while (System.currentTimeMillis() - start < RETURN_READY_TIMEOUT_MS) {
             if (chatReadyAt >= start) break
             delay(250L)
+        }
+        if (chatReadyAt >= start) {
+            updateFloatStatus("已回到聊天页")
         }
         return ReturnToChatResult(
             waitedMs = System.currentTimeMillis() - start,
