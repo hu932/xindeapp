@@ -37,7 +37,9 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private val runPendingUrlRunnable = Runnable { runPendingUrl() }
+    private val runPendingUrlRunnable = Runnable {
+        runSafely("runPendingUrl") { runPendingUrl() }
+    }
     private val linkAttemptRunnables = mutableListOf<Runnable>()
     private var receiver: BroadcastReceiver? = null
     private var pendingUrl: String? = null
@@ -46,19 +48,26 @@ class ChatTaskAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        isEnabled = true
-        serviceInfo = serviceInfo.apply {
-            eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
-                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
-                AccessibilityEvent.TYPE_VIEW_FOCUSED
-            feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
-            flags = flags or
-                AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
-                AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-            notificationTimeout = 80L
+        runSafely("onServiceConnected") {
+            isEnabled = true
+            val info = serviceInfo
+            if (info != null) {
+                serviceInfo = info.apply {
+                    eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
+                        AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
+                        AccessibilityEvent.TYPE_VIEW_FOCUSED
+                    feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
+                    flags = flags or
+                        AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+                        AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+                    notificationTimeout = 80L
+                }
+            } else {
+                Log.w(TAG, "Service info is null, keeping XML accessibility config")
+            }
+            registerCommandReceiver()
+            Toast.makeText(this, "聊天任务辅助已开启", Toast.LENGTH_SHORT).show()
         }
-        registerCommandReceiver()
-        Toast.makeText(this, "聊天任务辅助已开启", Toast.LENGTH_SHORT).show()
     }
 
     override fun onDestroy() {
@@ -69,44 +78,57 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (pendingUrl != null) {
-            handler.removeCallbacks(runPendingUrlRunnable)
-            handler.postDelayed(runPendingUrlRunnable, 250L)
-            return
-        }
+        runSafely("onAccessibilityEvent") {
+            if (pendingUrl != null) {
+                handler.removeCallbacks(runPendingUrlRunnable)
+                handler.postDelayed(runPendingUrlRunnable, 250L)
+                return@runSafely
+            }
 
-        val root = activeContentRoot() ?: return
-        if (containsAnyText(root, productUnavailableHints)) {
-            closeBlockingPopup(root)
-            sendBroadcast(Intent(ACTION_PRODUCT_BLOCKED))
-            handler.postDelayed({ returnToChatScreen() }, 1_400L)
-            return
-        }
+            val root = activeContentRoot() ?: return@runSafely
+            if (containsAnyText(root, productUnavailableHints)) {
+                closeBlockingPopup(root)
+                sendBroadcast(Intent(ACTION_PRODUCT_BLOCKED))
+                handler.postDelayed({ runSafely("returnAfterBlocked") { returnToChatScreen() } }, 1_400L)
+                return@runSafely
+            }
 
-        if (hasShopeeRecommendPopup(root)) {
-            closeBlockingPopup(root)
+            if (hasShopeeRecommendPopup(root)) {
+                closeBlockingPopup(root)
+            }
         }
     }
 
     override fun onInterrupt() = Unit
 
+    private fun runSafely(section: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (e: Throwable) {
+            Log.e(TAG, "Accessibility section failed: $section", e)
+        }
+    }
+
     private fun registerCommandReceiver() {
+        receiver?.let { runCatching { unregisterReceiver(it) } }
         receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
-                when (intent.action) {
-                    ACTION_OPEN_TASK_URL -> {
-                        val url = intent.getStringExtra(EXTRA_URL)?.trim().orEmpty()
-                        if (url.isBlank()) return
-                        cancelLinkAttempts()
-                        pendingUrl = url
-                        handler.post(runPendingUrlRunnable)
-                    }
-                    ACTION_RETURN_TO_CHAT -> {
-                        cancelLinkAttempts()
-                        handler.post { returnToChatScreen() }
-                    }
-                    ACTION_CANCEL_CHAT_TASK -> {
-                        cancelAutomation()
+                runSafely("commandReceiver") {
+                    when (intent.action) {
+                        ACTION_OPEN_TASK_URL -> {
+                            val url = intent.getStringExtra(EXTRA_URL)?.trim().orEmpty()
+                            if (url.isBlank()) return@runSafely
+                            cancelLinkAttempts()
+                            pendingUrl = url
+                            handler.post(runPendingUrlRunnable)
+                        }
+                        ACTION_RETURN_TO_CHAT -> {
+                            cancelLinkAttempts()
+                            handler.post { runSafely("returnToChatCommand") { returnToChatScreen() } }
+                        }
+                        ACTION_CANCEL_CHAT_TASK -> {
+                            cancelAutomation()
+                        }
                     }
                 }
             }
@@ -116,10 +138,11 @@ class ChatTaskAccessibilityService : AccessibilityService() {
             addAction(ACTION_RETURN_TO_CHAT)
             addAction(ACTION_CANCEL_CHAT_TASK)
         }
+        val currentReceiver = receiver ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(receiver, filter, RECEIVER_EXPORTED)
+            registerReceiver(currentReceiver, filter, RECEIVER_NOT_EXPORTED)
         } else {
-            registerReceiver(receiver, filter)
+            registerReceiver(currentReceiver, filter)
         }
     }
 
@@ -143,7 +166,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         }
 
         pendingUrl = null
-        handler.postDelayed({ clickSendOrEnter(url) }, 350L)
+        handler.postDelayed({ runSafely("clickSendOrEnter") { clickSendOrEnter(url) } }, 350L)
         scheduleLinkOpenAttempts(url)
     }
 
@@ -173,7 +196,9 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         cancelLinkAttempts()
         listOf(1800L, 2600L, 3600L, 5000L).forEach { delayMs ->
             val runnable = Runnable {
-                if (clickVisibleTaskLink(url)) cancelLinkAttempts()
+                runSafely("clickVisibleTaskLink") {
+                    if (clickVisibleTaskLink(url)) cancelLinkAttempts()
+                }
             }
             linkAttemptRunnables.add(runnable)
             handler.postDelayed(runnable, delayMs)
@@ -296,14 +321,16 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     }
 
     private fun returnToChatScreen() {
-        returnAttempts = 0
-        stepReturnToChat()
+        runSafely("returnToChatScreen") {
+            returnAttempts = 0
+            stepReturnToChat()
+        }
     }
 
     private fun stepReturnToChat() {
         val root = activeContentRoot()
         if (root != null && closeBlockingPopup(root)) {
-            handler.postDelayed({ stepReturnToChat() }, 1_200L)
+            handler.postDelayed({ runSafely("stepReturnToChat") { stepReturnToChat() } }, 1_200L)
             return
         }
 
@@ -331,7 +358,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
 
         returnAttempts++
         performGlobalAction(GLOBAL_ACTION_BACK)
-        handler.postDelayed({ stepReturnToChat() }, 1_000L)
+        handler.postDelayed({ runSafely("stepReturnToChat") { stepReturnToChat() } }, 1_000L)
     }
 
     private fun activeContentRoot(): AccessibilityNodeInfo? {
