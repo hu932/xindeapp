@@ -256,7 +256,11 @@ class ChatTaskAccessibilityService : AccessibilityService() {
 
     private fun findChatInputCandidate(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         if (isOwnAppNode(node)) return null
-        if (isNodeUsable(node) && !isSearchEditableNode(node) && hasChatInputPlaceholderHint(node)) {
+        if (isVisibleNodeWithBounds(node) &&
+            !isSearchEditableNode(node) &&
+            hasChatInputPlaceholderHint(node) &&
+            isLikelyChatInputArea(node)
+        ) {
             return node
         }
         for (i in 0 until node.childCount) {
@@ -419,6 +423,10 @@ class ChatTaskAccessibilityService : AccessibilityService() {
         return isChatInputContext(root, candidate)
     }
 
+    private fun hasChatPageSignal(root: AccessibilityNodeInfo): Boolean {
+        return hasChatScreenContext(root) || containsAnyText(root, chatScreenHints)
+    }
+
     private fun isChatInputContext(
         root: AccessibilityNodeInfo,
         input: AccessibilityNodeInfo
@@ -447,6 +455,17 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     private fun hasChatInputPlaceholderHint(node: AccessibilityNodeInfo): Boolean {
         val inputLabel = nodeLabel(node).lowercase()
         return chatInputPlaceholderHints.any { inputLabel.contains(it) }
+    }
+
+    private fun isLikelyChatInputArea(node: AccessibilityNodeInfo): Boolean {
+        val rect = Rect()
+        node.getBoundsInScreen(rect)
+        val displayHeight = resources.displayMetrics.heightPixels.coerceAtLeast(1)
+        val viewId = node.viewIdResourceName.orEmpty().lowercase()
+        return rect.centerY() >= (displayHeight * 0.55f).toInt() ||
+            chatInputIdHints.any { viewId.contains(it) } ||
+            node.isClickable ||
+            node.isFocusable
     }
 
     private fun isReadyChatScreen(root: AccessibilityNodeInfo): Boolean {
@@ -530,7 +549,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     }
 
     private fun isLikelyProductPage(root: AccessibilityNodeInfo): Boolean {
-        if (!isShopeeNode(root) || isProbablyChatScreen(root)) return false
+        if (!isShopeeNode(root) || hasChatPageSignal(root)) return false
         return containsAnyText(root, productPageHints) ||
             hasShopeeRecommendPopup(root) ||
             containsAnyText(root, productUnavailableHints)
@@ -538,7 +557,7 @@ class ChatTaskAccessibilityService : AccessibilityService() {
 
     private fun isShopeeBrowsingPage(root: AccessibilityNodeInfo?): Boolean {
         if (root == null || !isShopeeNode(root)) return false
-        if (hasChatScreenContext(root)) return false
+        if (hasChatPageSignal(root)) return false
         return true
     }
 
@@ -647,7 +666,12 @@ class ChatTaskAccessibilityService : AccessibilityService() {
     }
 
     private fun isNodeUsable(node: AccessibilityNodeInfo): Boolean {
-        if (!node.isEnabled || !node.isVisibleToUser) return false
+        if (!node.isEnabled || !isVisibleNodeWithBounds(node)) return false
+        return true
+    }
+
+    private fun isVisibleNodeWithBounds(node: AccessibilityNodeInfo): Boolean {
+        if (!node.isVisibleToUser) return false
         val rect = Rect()
         node.getBoundsInScreen(rect)
         return rect.width() > 0 && rect.height() > 0
@@ -716,6 +740,12 @@ class ChatTaskAccessibilityService : AccessibilityService() {
 
     private val chatHints = setOf(
         "发送", "傳送", "消息", "訊息", "message", "Message", "chat", "Chat"
+    )
+
+    private val chatScreenHints = setOf(
+        "輸入私訊", "输入私信", "評價客服", "评价客服",
+        "在開始聊天前", "在开始聊天前", "請先驗證您的電話號碼", "请先验证您的电话号码",
+        "點此驗證", "点此验证"
     )
 
     private val productUnavailableHints = setOf(
