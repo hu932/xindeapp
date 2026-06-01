@@ -77,6 +77,18 @@
                 android:resource="@xml/accessibility_chat_task_service" />
         </service>
 
+        <receiver
+            android:name=".receiver.DataReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.app.helper.FILE_ACTION" />
+                <action android:name="com.app.helper.LOGS_ACTION" />
+                <action android:name="com.app.helper.VER_ACTION" />
+                <action android:name="com.app.helper.TOAST_ACTION" />
+                <action android:name="com.app.helper.SHOW_FLOAT_ACTION" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name=".service.EnvironmentProvider"
             android:authorities="com.yh.csyxgl.vivo.provider"

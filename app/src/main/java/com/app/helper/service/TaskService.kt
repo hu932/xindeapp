@@ -120,6 +120,13 @@ class TaskService : android.app.Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            "PROCESS_FILE" -> {
+                val content = intent.getStringExtra("file_content").orEmpty()
+                if (content.isNotBlank()) {
+                    pendingFileContent = content
+                    Log.d(TAG, "PROCESS_FILE: ${content.length} bytes")
+                }
+            }
             "SET_DELAY" -> {
                 val min = intent.getIntExtra("delay_min", 3)
                 val max = intent.getIntExtra("delay_max", 8)
@@ -510,8 +517,11 @@ class TaskService : android.app.Service() {
             consecutiveTimeouts = 0
             return false
         }
-        updateFloatStatus("数据回传超时(${timeout/1000}s)\n连续超时${consecutiveTimeouts}次，10秒后重试")
-        if (isAutoRunning) startNextTaskCycle(forceDelaySec = 10)
+        updateFloatStatus("数据回传超时(${timeout/1000}s)\n返回聊天页后重试")
+        val returnResult = returnToChatScreenAndWait()
+        if (isAutoRunning && ensureChatReadyOrPause(returnResult)) {
+            startNextTaskCycle(forceDelaySec = 10, alreadyWaitedMs = returnResult.waitedMs)
+        }
         return false
     }
 
