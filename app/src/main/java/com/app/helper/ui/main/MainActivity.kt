@@ -74,7 +74,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnDelay3060.setOnClickListener { applyDelayPreset(30, 60) }
         refreshDelayUI()
         setupPauseConfig()
-        setupSilentMode()
+        setupJumpMode()
         setupTabs()
         setupFingerprintPage()
 
@@ -404,22 +404,27 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun setupSilentMode() {
+    private fun setupJumpMode() {
         val prefs = getSharedPreferences("task_config", MODE_PRIVATE)
-        binding.switchSilentMode.isChecked = prefs.getBoolean("silent_mode", false)
-        binding.switchSilentMode.setOnCheckedChangeListener { _, _ -> pushSilentMode() }
-    }
-
-    private fun pushSilentMode() {
-        val prefs = getSharedPreferences("task_config", MODE_PRIVATE)
-        val enabled = binding.switchSilentMode.isChecked
-        prefs.edit().putBoolean("silent_mode", enabled).apply()
-        if (TaskService.isRunning) {
-            val intent = Intent(this, TaskService::class.java).apply {
-                action = "SET_SILENT_MODE"
-                putExtra("silent_mode", enabled)
+        when (prefs.getInt("jump_mode", 0)) {
+            1 -> binding.btnModeBg.isChecked = true
+            2 -> binding.btnModeSilent.isChecked = true
+            else -> binding.btnModeNormal.isChecked = true
+        }
+        binding.tabGroupJump.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (!isChecked) return@addOnButtonCheckedListener
+            val mode = when (checkedId) {
+                R.id.btn_mode_bg -> 1
+                R.id.btn_mode_silent -> 2
+                else -> 0
             }
-            startService(intent)
+            prefs.edit().putInt("jump_mode", mode).apply()
+            if (TaskService.isRunning) {
+                startService(Intent(this, TaskService::class.java).apply {
+                    action = "SET_JUMP_MODE"
+                    putExtra("jump_mode", mode)
+                })
+            }
         }
     }
 

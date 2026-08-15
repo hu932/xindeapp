@@ -89,7 +89,7 @@ class TaskService : android.app.Service() {
     private val pauseEnabled get() = prefs.getBoolean("pause_enabled", false)
     private val pauseCount get() = prefs.getInt("pause_count", 50)
     private val pauseMinutes get() = prefs.getInt("pause_minutes", 30)
-    private val silentMode get() = prefs.getBoolean("silent_mode", false)
+    private val jumpMode get() = prefs.getInt("jump_mode", 0)
     private var sessionUploadCount = 0
     private var pauseJob: Job? = null
 
@@ -141,7 +141,19 @@ class TaskService : android.app.Service() {
             "SET_SILENT_MODE" -> {
                 val enabled = intent.getBooleanExtra("silent_mode", false)
                 prefs.edit().putBoolean("silent_mode", enabled).apply()
+                prefs.edit().putInt("jump_mode", if (enabled) 2 else 0).apply()
                 updateFloatStatus(if (enabled) "已开启静默模式（不跳转商品页）" else "已关闭静默模式（跳转商品页）")
+            }
+            "SET_JUMP_MODE" -> {
+                val mode = intent.getIntExtra("jump_mode", 0)
+                prefs.edit().putInt("jump_mode", mode).apply()
+                updateFloatStatus(
+                    when (mode) {
+                        1 -> "页面模式：跳转后切后台抓取"
+                        2 -> "页面模式：纯静默（不回传自动回退跳转）"
+                        else -> "页面模式：常规跳转"
+                    }
+                )
             }
         }
         return START_STICKY
@@ -405,27 +417,48 @@ class TaskService : android.app.Service() {
         sendBroadcast(wakeIntent)
         Log.d(TAG, "Wake broadcast: $productUrl")
 
-        if (!silentMode) {
-            delay(1000)
-            launchVisible(productUrl)
-            return
-        }
-
-        // 静默模式：只发唤醒广播，环境App内部路由打开商品页并抓包
-        updateFloatStatus("静默模式：已通知环境抓取，不跳转页面...")
-        val silentWaitMs = 15_000L
-        val start = System.currentTimeMillis()
-        while (System.currentTimeMillis() - start < silentWaitMs) {
-            if (pendingFileContent != null) {
-                updateFloatStatus("静默抓取成功，数据已回传")
-                return
+        when (jumpMode) {
+            2 -> {
+                // 纯静默：只发唤醒广播，等回传，超时回退跳转
+                updateFloatStatus("纯静默：已通知环境抓取，不跳转页面...")
+                val silentWaitMs = 15_000L
+                val start = System.currentTimeMillis()
+                while (System.currentTimeMillis() - start < silentWaitMs) {
+                    if (pendingFileContent != null) {
+                        updateFloatStatus("静默抓取成功，数据已回传")
+                        return
+                    }
+                    delay(300)
+                }
+                updateFloatStatus("纯静默未回传，回退前台跳转...")
+                delay(1000)
+                launchVisible(productUrl)
             }
-            delay(300)
+            1 -> {
+                // 跳转后切后台：页面加载几秒发出 PDP 请求后按 Home 键，网络层 hook 后台照常抓包
+                delay(1000)
+                launchVisible(productUrl)
+                updateFloatStatus("已打开商品页，稍后切后台...")
+                delay(4_000L)
+                goHome()
+                updateFloatStatus("已切后台，等待数据回传...")
+            }
+            else -> {
+                delay(1000)
+                launchVisible(productUrl)
+            }
         }
-        // 静默等待超时未回传，回退前台跳转
-        updateFloatStatus("静默模式未回传，回退前台跳转...")
-        delay(1000)
-        launchVisible(productUrl)
+    }
+
+    private fun goHome() {
+        try {
+            startActivity(Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            })
+        } catch (e: Exception) {
+            Log.w(TAG, "Go home failed", e)
+        }
     }
 
     private fun launchVisible(productUrl: String) {
