@@ -16,7 +16,7 @@
             android:id="@+id/tv_dot"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="格"
+            android:text="J"
             android:textColor="#FFFFFF"
             android:textSize="14sp"
             android:textStyle="bold" />
