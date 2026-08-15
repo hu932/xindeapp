@@ -84,10 +84,10 @@ class TaskService : android.app.Service() {
     @Volatile private var pendingFileContent: String? = null
 
     private val prefs by lazy { getSharedPreferences(PREF_NAME, MODE_PRIVATE) }
-    private val delayMin get() = prefs.getInt("delay_min", 3)
-    private val delayMax get() = prefs.getInt("delay_max", 8)
-    private val pauseEnabled get() = prefs.getBoolean("pause_enabled", false)
-    private val pauseCount get() = prefs.getInt("pause_count", 50)
+    private val delayMin get() = prefs.getInt("delay_min", 15)
+    private val delayMax get() = prefs.getInt("delay_max", 35)
+    private val pauseEnabled get() = prefs.getBoolean("pause_enabled", true)
+    private val pauseCount get() = prefs.getInt("pause_count", 30)
     private val pauseMinutes get() = prefs.getInt("pause_minutes", 30)
     private val silentMode get() = prefs.getBoolean("silent_mode", false)
     private var sessionUploadCount = 0
@@ -118,14 +118,14 @@ class TaskService : android.app.Service() {
                 }
             }
             "SET_DELAY" -> {
-                val min = intent.getIntExtra("delay_min", 3)
-                val max = intent.getIntExtra("delay_max", 8)
+                val min = intent.getIntExtra("delay_min", 15)
+                val max = intent.getIntExtra("delay_max", 35)
                 prefs.edit().putInt("delay_min", min).putInt("delay_max", max).apply()
                 updateFloatStatus("延时已设置: ${min}-${max}秒")
             }
             "SET_PAUSE" -> {
-                val enabled = intent.getBooleanExtra("pause_enabled", false)
-                val count = intent.getIntExtra("pause_count", 50)
+                val enabled = intent.getBooleanExtra("pause_enabled", true)
+                val count = intent.getIntExtra("pause_count", 30)
                 val minutes = intent.getIntExtra("pause_minutes", 30)
                 prefs.edit()
                     .putBoolean("pause_enabled", enabled)
@@ -318,7 +318,12 @@ class TaskService : android.app.Service() {
         } else {
             val min = delayMin.coerceAtLeast(0)
             val max = delayMax.coerceAtLeast(min)
-            (min..max).random() * 1000L
+            var ms = (min..max).random() * 1000L
+            // 拟人化：25% 概率延长停留，模拟真实浏览节奏，降低风控
+            if (kotlin.random.Random.nextInt(100) < 25) {
+                ms = (ms * (1.5 + kotlin.random.Random.nextDouble() * 1.5)).toLong()
+            }
+            ms
         }
         val remainingDelayMs = (delayMs - alreadyWaitedMs).coerceAtLeast(0L)
         val tipPrefix = if (forceDelaySec != null) "风控重试" else "自动领取任务"
@@ -508,7 +513,8 @@ class TaskService : android.app.Service() {
     private fun triggerPauseRestIfNeeded(): Boolean {
         if (!pauseEnabled) return false
         val threshold = pauseCount.coerceAtLeast(1)
-        val minutes = pauseMinutes.coerceAtLeast(1)
+        // 休息时长随机 ±25%，避免固定周期被风控识别
+        val minutes = (pauseMinutes * (0.75 + kotlin.random.Random.nextDouble() * 0.5)).toInt().coerceAtLeast(3)
         if (sessionUploadCount < threshold) return false
 
         sessionUploadCount = 0

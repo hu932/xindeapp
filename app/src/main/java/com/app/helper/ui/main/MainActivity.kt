@@ -348,8 +348,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshDelayUI() {
         val prefs = getSharedPreferences("task_config", MODE_PRIVATE)
-        val min = prefs.getInt("delay_min", 3)
-        val max = prefs.getInt("delay_max", 8)
+        val min = prefs.getInt("delay_min", 15)
+        val max = prefs.getInt("delay_max", 35)
         binding.tvCurrentDelay.text = "当前：$min-$max 秒"
 
         val active = android.content.res.ColorStateList.valueOf(0xFF1976D2.toInt())
@@ -369,8 +369,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupPauseConfig() {
         val prefs = getSharedPreferences("task_config", MODE_PRIVATE)
-        binding.switchPauseEnabled.isChecked = prefs.getBoolean("pause_enabled", false)
-        binding.etPauseCount.setText(prefs.getInt("pause_count", 50).toString())
+        binding.switchPauseEnabled.isChecked = prefs.getBoolean("pause_enabled", true)
+        binding.etPauseCount.setText(prefs.getInt("pause_count", 30).toString())
         binding.etPauseMinutes.setText(prefs.getInt("pause_minutes", 30).toString())
 
         binding.switchPauseEnabled.setOnCheckedChangeListener { _, _ -> pushPauseConfig() }
@@ -580,8 +580,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun showDelayConfigDialog() {
         val prefs = getSharedPreferences("task_config", MODE_PRIVATE)
-        val curMin = prefs.getInt("delay_min", 3)
-        val curMax = prefs.getInt("delay_max", 8)
+        val curMin = prefs.getInt("delay_min", 15)
+        val curMax = prefs.getInt("delay_max", 35)
 
         val view = layoutInflater.inflate(R.layout.dialog_delay, null)
         val etMin = view.findViewById<android.widget.EditText>(R.id.et_delay_min)
