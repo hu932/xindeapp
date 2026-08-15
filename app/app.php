@@ -5,7 +5,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 
 $apiUrl = 'upload_count_api.php';
 $today = date('Y-m-d');
-const APP_AUTH_USERNAME = '格界';
+const APP_AUTH_USERNAME = 'Ajie';
 const APP_AUTH_PASSWORD = '2026888';
 const APP_AUTH_SESSION_KEY = 'app_panel_auth';
 const APP_ICON_FILE = '1777990327149137925.png';
@@ -326,7 +326,7 @@ function appRenderLoginPage(string $errorMessage = ''): void {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>格界管理后台 · 登录</title>
+  <title>Ajie管理后台 · 登录</title>
   <link rel="icon" type="image/png" href="<?= htmlspecialchars(APP_ICON_FILE, ENT_QUOTES, 'UTF-8') ?>">
   <link rel="apple-touch-icon" href="<?= htmlspecialchars(APP_ICON_FILE, ENT_QUOTES, 'UTF-8') ?>">
   <style>
@@ -563,7 +563,7 @@ function appRenderLoginPage(string $errorMessage = ''): void {
       <div>
         <div class="auth-badge"><span class="auth-badge-dot"></span>Secure Workspace</div>
         <div class="hero-copy">
-          <h1>格界数据</h1>
+          <h1>Ajie数据</h1>
           <p>统一查看账号表现、日历事件、时间规划与趋势报表。先登录，再进入你的工作台。</p>
         </div>
         <div class="auth-tiles">
@@ -580,10 +580,10 @@ function appRenderLoginPage(string $errorMessage = ''): void {
       <form class="auth-card" method="post" action="<?= htmlspecialchars($_SERVER['PHP_SELF'] ?? 'app.php', ENT_QUOTES, 'UTF-8') ?>">
         <div class="brand">
           <div class="brand-mark">
-            <img src="<?= htmlspecialchars(APP_ICON_FILE, ENT_QUOTES, 'UTF-8') ?>" alt="格界图标">
+            <img src="<?= htmlspecialchars(APP_ICON_FILE, ENT_QUOTES, 'UTF-8') ?>" alt="Ajie图标">
           </div>
           <div>
-            <h2>格界</h2>
+            <h2>Ajie</h2>
             <p>Admin Access Portal</p>
           </div>
         </div>
@@ -1012,7 +1012,7 @@ if (!appIsAuthenticated()) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>格界管理后台</title>
+  <title>Ajie管理后台</title>
   <link rel="icon" type="image/png" href="<?= htmlspecialchars(APP_ICON_FILE, ENT_QUOTES, 'UTF-8') ?>">
   <link rel="apple-touch-icon" href="<?= htmlspecialchars(APP_ICON_FILE, ENT_QUOTES, 'UTF-8') ?>">
   <style>
@@ -1352,11 +1352,11 @@ if (!appIsAuthenticated()) {
       <div class="sidebar-head">
         <div class="brand">
           <div class="brand-mark">
-            <img src="<?= htmlspecialchars(APP_ICON_FILE, ENT_QUOTES, 'UTF-8') ?>" alt="格界图标">
+            <img src="<?= htmlspecialchars(APP_ICON_FILE, ENT_QUOTES, 'UTF-8') ?>" alt="Ajie图标">
           </div>
           <div class="brand-title">
-            <span class="brand-text">格界数据</span>
-            <span class="brand-sub">格界管理后台</span>
+            <span class="brand-text">Ajie数据</span>
+            <span class="brand-sub">Ajie管理后台</span>
           </div>
         </div>
         <button id="collapseBtn" class="collapse-btn" aria-label="切换侧边栏">

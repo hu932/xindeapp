@@ -1,6 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">格界32-34</string>
-    <string name="accessibility_chat_task_label">格界聊天任务辅助</string>
-    <string name="accessibility_chat_task_description">把任务链接填入当前聊天输入框并点击进入，用于手动打开聊天页后的自动任务流程。</string>
+    <string name="app_name">Ajie</string>
 </resources>

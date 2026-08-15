@@ -13,7 +13,6 @@ object TokenManager {
     private const val KEY_GROUP_ID = "group_id"
 
     const val API_TYPE_1 = 1
-    const val API_TYPE_2 = 2
 
     private val prefs: SharedPreferences by lazy {
         App.context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -33,7 +32,7 @@ object TokenManager {
     fun saveGroupId(groupId: String) { prefs.edit().putString(KEY_GROUP_ID, groupId).apply() }
     fun getGroupId(): String = prefs.getString(KEY_GROUP_ID, "") ?: ""
 
-    fun isLoggedIn(): Boolean = getToken().isNotEmpty() || getApiType() == API_TYPE_2
+    fun isLoggedIn(): Boolean = getToken().isNotEmpty()
 
     fun logout() { prefs.edit().clear().apply() }
 }

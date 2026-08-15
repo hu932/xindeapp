@@ -45,23 +45,6 @@ class LoginActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             try {
-                val api2Response = ApiService.loginApi2(username, password)
-                if (api2Response.isSuccess && api2Response.data != null) {
-                    val groupId = api2Response.data.groupId.ifBlank { username }
-                    TokenManager.saveUsername(password)
-                    TokenManager.saveGroupId(groupId)
-                    TokenManager.saveApiType(TokenManager.API_TYPE_2)
-                    TokenManager.saveToken(api2Response.data.token.ifBlank { "api2_$password" })
-                    getSharedPreferences("task_config", MODE_PRIVATE)
-                        .edit().putString("saved_password", password).apply()
-                    Toast.makeText(this@LoginActivity, "登录成功", Toast.LENGTH_SHORT).show()
-                    startMain()
-                    return@launch
-                }
-            } catch (_: Exception) {
-            }
-
-            try {
                 val response = ApiService.login(username, password)
                 if (response.isSuccess && response.data != null) {
                     TokenManager.saveToken(response.data.token)

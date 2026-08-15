@@ -21,7 +21,6 @@ import com.app.helper.R
 import com.app.helper.databinding.ActivityMainBinding
 import com.app.helper.network.ApiService
 import com.app.helper.network.UpdateResponse
-import com.app.helper.service.ChatTaskAccessibilityService
 import com.app.helper.service.TaskService
 import com.app.helper.ui.login.LoginActivity
 import com.app.helper.util.FingerprintManager
@@ -75,17 +74,14 @@ class MainActivity : AppCompatActivity() {
         binding.btnDelay3060.setOnClickListener { applyDelayPreset(30, 60) }
         refreshDelayUI()
         setupPauseConfig()
+        setupSilentMode()
         setupTabs()
         setupFingerprintPage()
 
         binding.btnStartAuto.setOnClickListener {
             if (checkOverlayPermission()) {
-                if (!ChatTaskAccessibilityService.isEnabled) {
-                    showAccessibilityGuide()
-                    return@setOnClickListener
-                }
                 startTaskService()
-                Toast.makeText(this, "服务已启动，请手动打开聊天页后使用悬浮窗开始。", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "服务已启动，请使用悬浮窗开始任务。", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -408,6 +404,25 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun setupSilentMode() {
+        val prefs = getSharedPreferences("task_config", MODE_PRIVATE)
+        binding.switchSilentMode.isChecked = prefs.getBoolean("silent_mode", false)
+        binding.switchSilentMode.setOnCheckedChangeListener { _, _ -> pushSilentMode() }
+    }
+
+    private fun pushSilentMode() {
+        val prefs = getSharedPreferences("task_config", MODE_PRIVATE)
+        val enabled = binding.switchSilentMode.isChecked
+        prefs.edit().putBoolean("silent_mode", enabled).apply()
+        if (TaskService.isRunning) {
+            val intent = Intent(this, TaskService::class.java).apply {
+                action = "SET_SILENT_MODE"
+                putExtra("silent_mode", enabled)
+            }
+            startService(intent)
+        }
+    }
+
     private fun registerUpdateReceiver() {        updateReceiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
                 val isBlocked = intent.getBooleanExtra("blocked", false)
@@ -520,9 +535,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun downloadApk(apkUrl: String, versionName: String) {
         try {
-            val fileName = "格界32-34-${versionName.ifBlank { "更新" }}.apk"
+            val fileName = "Ajie-${versionName.ifBlank { "更新" }}.apk"
             val request = DownloadManager.Request(Uri.parse(apkUrl))
-                .setTitle("格界32-34 更新")
+                .setTitle("Ajie 更新")
                 .setDescription("正在下载更新")
                 .setMimeType("application/vnd.android.package-archive")
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
@@ -622,17 +637,6 @@ class MainActivity : AppCompatActivity() {
             return false
         }
         return true
-    }
-
-    private fun showAccessibilityGuide() {
-        AlertDialog.Builder(this)
-            .setTitle("开启聊天任务辅助")
-            .setMessage("请在无障碍设置里开启【格界聊天任务辅助】。开启后手动打开聊天页面，再点击悬浮窗【一键做任务】。")
-            .setPositiveButton("去开启") { _, _ ->
-                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            }
-            .setNegativeButton("取消", null)
-            .show()
     }
 
     private fun requestPermissions() {

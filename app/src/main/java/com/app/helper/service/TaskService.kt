@@ -25,7 +25,6 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.app.helper.R
 import com.app.helper.network.ApiService
-import com.app.helper.network.Api2TaskInfo
 import com.app.helper.util.TokenManager
 import kotlinx.coroutines.*
 import org.json.JSONObject
@@ -40,17 +39,9 @@ class TaskService : android.app.Service() {
         private const val CHANNEL_ID = "app_service_channel"
         private const val NOTIFICATION_ID = 1001
         private const val PREF_NAME = "task_config"
-        private const val UPLOAD_SUCCESS_RETURN_DELAY_MS = 2_000L
-        private const val RETURN_SETTLE_DELAY_MS = 3_000L
-        private const val RETURN_READY_TIMEOUT_MS = 15_000L
         var isRunning = false
             private set
     }
-
-    private data class ReturnToChatResult(
-        val waitedMs: Long,
-        val ready: Boolean
-    )
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val handler = Handler(Looper.getMainLooper())
@@ -90,9 +81,6 @@ class TaskService : android.app.Service() {
 
     private var receiver: BroadcastReceiver? = null
     @Volatile private var pendingFileContent: String? = null
-    @Volatile private var pendingProductBlocked = false
-    @Volatile private var chatReadyAt = 0L
-    private var currentApi2TaskInfo: Api2TaskInfo? = null
 
     private val prefs by lazy { getSharedPreferences(PREF_NAME, MODE_PRIVATE) }
     private val delayMin get() = prefs.getInt("delay_min", 3)
@@ -100,6 +88,7 @@ class TaskService : android.app.Service() {
     private val pauseEnabled get() = prefs.getBoolean("pause_enabled", false)
     private val pauseCount get() = prefs.getInt("pause_count", 50)
     private val pauseMinutes get() = prefs.getInt("pause_minutes", 30)
+    private val silentMode get() = prefs.getBoolean("silent_mode", false)
     private var sessionUploadCount = 0
     private var pauseJob: Job? = null
 
@@ -148,6 +137,11 @@ class TaskService : android.app.Service() {
                 }
                 updateFloatStatus(if (enabled) "定时休息已开启: ${count}个/${minutes}分钟" else "定时休息已关闭")
             }
+            "SET_SILENT_MODE" -> {
+                val enabled = intent.getBooleanExtra("silent_mode", false)
+                prefs.edit().putBoolean("silent_mode", enabled).apply()
+                updateFloatStatus(if (enabled) "已开启静默模式（不跳转商品页）" else "已关闭静默模式（跳转商品页）")
+            }
         }
         return START_STICKY
     }
@@ -156,7 +150,6 @@ class TaskService : android.app.Service() {
         super.onDestroy()
         isRunning = false
         isAutoRunning = false
-        cancelChatAutomation()
         serviceScope.cancel()
         countdownJob?.cancel()
         heartbeatJob?.cancel()
@@ -247,7 +240,6 @@ class TaskService : android.app.Service() {
         val compactMessage = message
             .replace("自动领取任务", "领任务")
             .replace("自动执行", "自动")
-            .replace("请保持聊天输入框可用", "保持聊天页")
             .replace("当日上传成功", "今日")
         statusMessage = "$compactMessage\n账号:${TokenManager.getUsername()} 今日:$uploadCount"
         handler.post { if (!isCollapsed) tvStatus?.text = statusMessage }
@@ -283,15 +275,10 @@ class TaskService : android.app.Service() {
             stopAutoForDeviceBlock()
             return
         }
-        if (!ChatTaskAccessibilityService.isEnabled) {
-            updateFloatStatus("请先开启【格界聊天任务辅助】，并手动打开聊天页面")
-            return
-        }
         if (isAutoRunning) {
             isAutoRunning = false
             countdownJob?.cancel()
             pauseJob?.cancel()
-            cancelChatAutomation()
             handler.post {
                 tvAction?.text = "一键做任务"
                 tvAction?.setBackgroundResource(R.drawable.bg_float_action)
@@ -318,7 +305,6 @@ class TaskService : android.app.Service() {
         if (versionBlocked) {
             isAutoRunning = false
             handler.post { tvAction?.text = "一键做任务"; tvAction?.setBackgroundResource(R.drawable.bg_float_action) }
-            cancelChatAutomation()
             updateFloatStatus("$versionBlockedMsg\n已停止自动执行")
             return
         }
@@ -360,24 +346,10 @@ class TaskService : android.app.Service() {
             stopAutoForDeviceBlock()
             return
         }
-        if (!ChatTaskAccessibilityService.isEnabled) {
-            isAutoRunning = false
-            handler.post {
-                tvAction?.text = "一键做任务"
-                tvAction?.setBackgroundResource(R.drawable.bg_float_action)
-            }
-            cancelChatAutomation()
-            updateFloatStatus("请先开启【格界聊天任务辅助】，并手动打开聊天页面")
-            return
-        }
         serviceScope.launch {
             sendHeartbeat()
             if (!deviceAllowed) return@launch
-            if (TokenManager.getApiType() == TokenManager.API_TYPE_2) {
-                claimAndExecuteTask2()
-            } else {
-                claimAndExecuteTask1()
-            }
+            claimAndExecuteTask1()
         }
     }
 
@@ -398,14 +370,12 @@ class TaskService : android.app.Service() {
                 currentTaskId = task.taskId
                 currentShopId = task.parseShopId()
                 currentItemId = task.parseItemId()
-                currentApi2TaskInfo = null
                 pendingFileContent = null
-                pendingProductBlocked = false
 
                 updateFloatStatus("已领取任务\nshop=$currentShopId item=$currentItemId")
                 broadcastStats()
                 delay(800)
-                if (!openTaskUrlInChat()) return@launch
+                launchShopeeProduct()
 
                 updateFloatStatus("等待数据回传...")
                 if (!waitForFileContent()) return@launch
@@ -425,67 +395,51 @@ class TaskService : android.app.Service() {
         }
     }
 
-    private fun claimAndExecuteTask2() {
-        serviceScope.launch {
-            try {
-                val groupId = "${TokenManager.getGroupId()}_${TokenManager.getUsername()}"
-                val taskResponse = ApiService.takeTask2(groupId)
-                if (!taskResponse.ok || taskResponse.taskData == null) {
-                    val msg = taskResponse.msg ?: "暂无任务"
-                    updateFloatStatus("$msg")
-                    if (isAutoRunning) startNextTaskCycle()
-                    return@launch
-                }
-
-                val taskData = taskResponse.taskData
-                currentApi2TaskInfo = taskData.task
-                currentShopId = taskData.parseShopId()
-                currentItemId = taskData.parseItemId()
-                currentTaskId = taskData.task?.id ?: ""
-                pendingFileContent = null
-                pendingProductBlocked = false
-
-                updateFloatStatus("已领取任务\nshop=$currentShopId item=$currentItemId")
-                broadcastStats()
-                delay(800)
-                if (!openTaskUrlInChat()) return@launch
-
-                updateFloatStatus("等待数据回传...")
-                if (!waitForFileContent()) return@launch
-
-                val content = pendingFileContent!!
-                pendingFileContent = null
-                isUploading = true
-                updateFloatStatus("正在上传数据...")
-                submitTaskResult2(content)
-
-            } catch (e: Exception) {
-                Log.e(TAG, "Task2 error", e)
-                updateFloatStatus("任务异常: ${e.message}")
-                isUploading = false
-                if (isAutoRunning) startNextTaskCycle()
-            }
+    private suspend fun launchShopeeProduct() {
+        val productUrl = "https://shopee.tw/product/$currentShopId/$currentItemId"
+        val wakeIntent = Intent(ApiConfig.WAKE_ACTION).apply {
+            setPackage(ApiConfig.TARGET_PACKAGE)
+            putExtra("url", productUrl)
         }
+        sendBroadcast(wakeIntent)
+        Log.d(TAG, "Wake broadcast: $productUrl")
+
+        if (!silentMode) {
+            delay(1000)
+            launchVisible(productUrl)
+            return
+        }
+
+        // 静默模式：只发唤醒广播，环境App内部路由打开商品页并抓包
+        updateFloatStatus("静默模式：已通知环境抓取，不跳转页面...")
+        val silentWaitMs = 15_000L
+        val start = System.currentTimeMillis()
+        while (System.currentTimeMillis() - start < silentWaitMs) {
+            if (pendingFileContent != null) {
+                updateFloatStatus("静默抓取成功，数据已回传")
+                return
+            }
+            delay(300)
+        }
+        // 静默等待超时未回传，回退前台跳转
+        updateFloatStatus("静默模式未回传，回退前台跳转...")
+        delay(1000)
+        launchVisible(productUrl)
     }
 
-    private suspend fun openTaskUrlInChat(): Boolean {
-        val productUrl = "https://shopee.tw/product/$currentShopId/$currentItemId"
-        if (!ChatTaskAccessibilityService.isEnabled) {
-            updateFloatStatus("请先开启【格界聊天任务辅助】，并手动打开聊天页面")
-            isAutoRunning = false
-            handler.post {
-                tvAction?.text = "一键做任务"
-                tvAction?.setBackgroundResource(R.drawable.bg_float_action)
+    private fun launchVisible(productUrl: String) {
+        try {
+            val launchIntent = Intent(Intent.ACTION_VIEW).apply {
+                data = Uri.parse(productUrl)
+                setPackage(ApiConfig.TARGET_PACKAGE)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
-            return false
+            startActivity(launchIntent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to launch Shopee", e)
+            updateFloatStatus("启动Shopee失败: ${e.message}")
+            if (isAutoRunning) startNextTaskCycle()
         }
-        updateFloatStatus("已发送任务链接到聊天页\n请保持聊天输入框可用")
-        sendBroadcast(Intent(ChatTaskAccessibilityService.ACTION_OPEN_TASK_URL).apply {
-            putExtra(ChatTaskAccessibilityService.EXTRA_URL, productUrl)
-        })
-        Log.d(TAG, "Send task URL to chat: $productUrl")
-        delay(1200)
-        return true
     }
 
     private suspend fun waitForFileContent(): Boolean {
@@ -496,37 +450,22 @@ class TaskService : android.app.Service() {
                 consecutiveTimeouts = 0
                 return true
             }
-            if (pendingProductBlocked) {
-                pendingProductBlocked = false
-                consecutiveTimeouts = 0
-                updateFloatStatus("商品不存在或已下架，跳过当前任务")
-                val returnResult = returnToChatScreenAndWait()
-                if (isAutoRunning && ensureChatReadyOrPause(returnResult)) {
-                    startNextTaskCycle(forceDelaySec = 1, alreadyWaitedMs = returnResult.waitedMs)
-                }
-                return false
-            }
             delay(500)
         }
         consecutiveTimeouts++
         if (consecutiveTimeouts >= 2) {
             isAutoRunning = false
             handler.post { tvAction?.text = "一键做任务"; tvAction?.setBackgroundResource(R.drawable.bg_float_action) }
-            cancelChatAutomation()
             updateFloatStatus("疑似风控！连续${consecutiveTimeouts}次超时\n已自动暂停，请检查环境")
             consecutiveTimeouts = 0
             return false
         }
-        updateFloatStatus("数据回传超时(${timeout/1000}s)\n返回聊天页后重试")
-        val returnResult = returnToChatScreenAndWait()
-        if (isAutoRunning && ensureChatReadyOrPause(returnResult)) {
-            startNextTaskCycle(forceDelaySec = 10, alreadyWaitedMs = returnResult.waitedMs)
-        }
+        updateFloatStatus("数据回传超时(${timeout/1000}s)\n连续超时${consecutiveTimeouts}次，10秒后重试")
+        if (isAutoRunning) startNextTaskCycle(forceDelaySec = 10)
         return false
     }
 
     private suspend fun submitTaskResult1(fileContent: String) {
-        var uploadSucceeded = false
         try {
             if (!deviceAllowed) {
                 stopAutoForDeviceBlock()
@@ -546,7 +485,6 @@ class TaskService : android.app.Service() {
                 deviceId = getAppDeviceId()
             )
             if (response.isApi1Success) {
-                uploadSucceeded = true
                 uploadCount++
                 sessionUploadCount++
                 updateFloatStatus("上传成功！")
@@ -562,100 +500,8 @@ class TaskService : android.app.Service() {
             isUploading = false
             currentTaskId = ""
             broadcastStats()
-            if (uploadSucceeded) {
-                delay(UPLOAD_SUCCESS_RETURN_DELAY_MS)
-            }
-            val returnResult = returnToChatScreenAndWait()
-            if (isAutoRunning && ensureChatReadyOrPause(returnResult) && !triggerPauseRestIfNeeded()) {
-                startNextTaskCycle(alreadyWaitedMs = returnResult.waitedMs)
-            }
+            if (isAutoRunning && !triggerPauseRestIfNeeded()) startNextTaskCycle()
         }
-    }
-
-    private suspend fun submitTaskResult2(fileContent: String) {
-        var uploadSucceeded = false
-        try {
-            if (!deviceAllowed) {
-                stopAutoForDeviceBlock()
-                return
-            }
-            val encryptedData = extractEncryptedData(fileContent)
-            val taskInfo = currentApi2TaskInfo ?: Api2TaskInfo()
-
-            val response = ApiService.submitTask2(
-                username = TokenManager.getUsername(),
-                groupId = TokenManager.getGroupId(),
-                taskInfo = taskInfo,
-                encryptedData = encryptedData,
-                deviceId = getAppDeviceId()
-            )
-
-            if (response.isApi2Success) {
-                uploadSucceeded = true
-                uploadCount++
-                sessionUploadCount++
-                updateFloatStatus("上传成功！")
-                Log.d(TAG, "Submit2 OK: task=$currentTaskId count=$uploadCount")
-            } else {
-                failedCount++
-                updateFloatStatus("上传失败: ${response.msg ?: "未知错误"}")
-            }
-        } catch (e: Exception) {
-            failedCount++
-            updateFloatStatus("上传异常: ${e.message}")
-        } finally {
-            isUploading = false
-            currentTaskId = ""
-            currentApi2TaskInfo = null
-            broadcastStats()
-            if (uploadSucceeded) {
-                delay(UPLOAD_SUCCESS_RETURN_DELAY_MS)
-            }
-            val returnResult = returnToChatScreenAndWait()
-            if (isAutoRunning && ensureChatReadyOrPause(returnResult) && !triggerPauseRestIfNeeded()) {
-                startNextTaskCycle(alreadyWaitedMs = returnResult.waitedMs)
-            }
-        }
-    }
-
-    private fun returnToChatScreen() {
-        try {
-            sendBroadcast(Intent(ChatTaskAccessibilityService.ACTION_RETURN_TO_CHAT))
-        } catch (e: Exception) {
-            Log.w(TAG, "Return to chat failed", e)
-        }
-    }
-
-    private suspend fun returnToChatScreenAndWait(): ReturnToChatResult {
-        val start = System.currentTimeMillis()
-        chatReadyAt = 0L
-        updateFloatStatus("正在返回聊天页...")
-        returnToChatScreen()
-        delay(RETURN_SETTLE_DELAY_MS)
-        while (System.currentTimeMillis() - start < RETURN_READY_TIMEOUT_MS) {
-            if (chatReadyAt >= start) break
-            delay(250L)
-        }
-        if (chatReadyAt >= start) {
-            updateFloatStatus("已回到聊天页")
-        }
-        return ReturnToChatResult(
-            waitedMs = System.currentTimeMillis() - start,
-            ready = chatReadyAt >= start
-        )
-    }
-
-    private fun ensureChatReadyOrPause(result: ReturnToChatResult): Boolean {
-        if (result.ready) return true
-        isAutoRunning = false
-        handler.post {
-            tvAction?.text = "一键做任务"
-            tvAction?.setBackgroundResource(R.drawable.bg_float_action)
-        }
-        cancelChatAutomation()
-        updateFloatStatus("未确认回到聊天输入框\n已暂停，请关闭弹窗或手动回到聊天页")
-        broadcastStats()
-        return false
     }
 
     private fun triggerPauseRestIfNeeded(): Boolean {
@@ -727,7 +573,6 @@ class TaskService : android.app.Service() {
         isUploading = false
         countdownJob?.cancel()
         pauseJob?.cancel()
-        cancelChatAutomation()
         handler.post { tvAction?.text = "一键做任务"; tvAction?.setBackgroundResource(R.drawable.bg_float_action) }
         updateFloatStatus(deviceBlockedMsg)
     }
@@ -754,7 +599,6 @@ class TaskService : android.app.Service() {
                         if (isAutoRunning) {
                             isAutoRunning = false
                             countdownJob?.cancel()
-                            cancelChatAutomation()
                             handler.post { tvAction?.text = "一键做任务"; tvAction?.setBackgroundResource(R.drawable.bg_float_action) }
                             updateFloatStatus("$versionBlockedMsg\n已停止自动执行")
                         }
@@ -783,11 +627,6 @@ class TaskService : android.app.Service() {
     // ==================== Auto Task Logic ====================
 
     private suspend fun autoReLogin() {
-        if (TokenManager.getApiType() == TokenManager.API_TYPE_2) {
-            updateFloatStatus("继续执行...")
-            if (isAutoRunning) startNextTaskCycle()
-            return
-        }
         updateFloatStatus("登录过期，正在重新登录...")
         try {
             val username = TokenManager.getUsername()
@@ -804,14 +643,7 @@ class TaskService : android.app.Service() {
         } catch (_: Exception) {}
         isAutoRunning = false
         handler.post { tvAction?.text = "一键做任务"; tvAction?.setBackgroundResource(R.drawable.bg_float_action) }
-        cancelChatAutomation()
         updateFloatStatus("登录失效，请重新登录")
-    }
-
-    private fun cancelChatAutomation() {
-        try {
-            sendBroadcast(Intent(ChatTaskAccessibilityService.ACTION_CANCEL_CHAT_TASK))
-        } catch (_: Exception) {}
     }
 
     // ==================== Broadcast Receiver ====================
@@ -830,14 +662,6 @@ class TaskService : android.app.Service() {
                             pendingFileContent = content
                             Log.d(TAG, "Data file read: ${content.length} bytes")
                         }
-                    }
-                    ChatTaskAccessibilityService.ACTION_PRODUCT_BLOCKED -> {
-                        pendingProductBlocked = true
-                        Log.d(TAG, "Product unavailable popup detected")
-                    }
-                    ChatTaskAccessibilityService.ACTION_CHAT_READY -> {
-                        chatReadyAt = System.currentTimeMillis()
-                        Log.d(TAG, "Chat screen ready")
                     }
                     "com.app.helper.TOAST_ACTION" -> {
                         val msg = intent.getStringExtra("extra_data") ?: ""
@@ -870,8 +694,6 @@ class TaskService : android.app.Service() {
             addAction("com.app.helper.LOGS_ACTION")
             addAction("com.app.helper.SHOW_FLOAT_ACTION")
             addAction("com.app.helper.STATS_QUERY")
-            addAction(ChatTaskAccessibilityService.ACTION_PRODUCT_BLOCKED)
-            addAction(ChatTaskAccessibilityService.ACTION_CHAT_READY)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(receiver, filter, RECEIVER_EXPORTED)
