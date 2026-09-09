@@ -59,9 +59,10 @@ object ChatNodes {
     /** 找一个可点击节点（自身或祖先可点击） */
     fun clickableNode(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
         var cur: AccessibilityNodeInfo? = node ?: return null
-        while (cur != null) {
-            if (runCatching { cur.isClickable }.getOrDefault(false)) return cur
-            cur = runCatching { cur.parent }.getOrNull()
+        while (true) {
+            val c = cur ?: break
+            if (runCatching { c.isClickable }.getOrDefault(false)) return c
+            cur = runCatching { c.parent }.getOrNull()
         }
         return null
     }

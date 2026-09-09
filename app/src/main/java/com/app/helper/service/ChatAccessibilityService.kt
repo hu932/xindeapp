@@ -1,6 +1,7 @@
 package com.app.helper.service
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.graphics.Bitmap
 import android.graphics.Path
@@ -73,13 +74,13 @@ class ChatAccessibilityService : AccessibilityService() {
     /** 前台窗口是否为 Shopee */
     fun isShopeeForeground(): Boolean {
         val root = rootInActiveWindow ?: return false
-        return isShopeePackage(root.packageName)
+        return isShopeePackage(root.packageName?.toString())
     }
 
     /** 取 Shopee 前台窗口的根节点（非 Shopee 返回 null） */
     fun activeShopeeRoot(): android.view.accessibility.AccessibilityNodeInfo? {
         val root = rootInActiveWindow ?: return null
-        return root.takeIf { isShopeePackage(it.packageName) }
+        return root.takeIf { isShopeePackage(it.packageName?.toString()) }
     }
 
     private fun isShopeePackage(pkg: String?): Boolean {
@@ -88,10 +89,13 @@ class ChatAccessibilityService : AccessibilityService() {
             pkg.contains("shopee", true)
     }
 
-    /** API30+ 是否支持无障碍截屏 */
+    /** API30+ 是否支持无障碍截屏（通过 AccessibilityServiceInfo 能力位判断） */
     fun screenshotSupported(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
-        return runCatching { canTakeScreenshot() }.getOrDefault(false)
+        return runCatching {
+            val caps = serviceInfo?.capabilities ?: 0
+            caps and AccessibilityServiceInfo.CAPABILITY_CAN_TAKE_SCREENSHOT != 0
+        }.getOrDefault(false)
     }
 
     /** API30+ 截屏（无障碍授权即可，无需 MediaProjection）；低于 30 返回 null */
