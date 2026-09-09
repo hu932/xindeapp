@@ -99,19 +99,6 @@ object ChatAuto {
             log(logger, "聊一聊：未找到聊天输入框，需先在Shopee打开聊天会话；回退普通流程")
             return false
         }
-
-        // 账号未验证手机号会限制聊天（Shopee 顶部/输入区会提示）
-        val verifyKeys = listOf(
-            "驗證您的電話號碼", "驗證電話號碼", "驗證電話", "驗證手機號",
-            "電話號碼", "电话验证", "验证手机号", "verify your phone"
-        )
-        val hitVerify = ChatNodes.collect(root()).any {
-            ChatNodes.containsAny(ChatNodes.textOf(it), verifyKeys) != null
-        }
-        if (hitVerify) {
-            log(logger, "聊一聊：Shopee 提示需先验证手机号才能聊天，无法聊一聊；回退普通流程")
-            return false
-        }
         val inputRect = Rect(ChatNodes.bounds(input))
 
         // 2) 聚焦并填入链接
