@@ -141,6 +141,16 @@ object ChatAuto {
             tapped = tapOcrLink(logger, link)
         }
         if (!tapped) {
+            // 兜底：Shopee 把链接渲染成卡片没有原文 → 点输入栏上方最新一条可点气泡（即刚发的消息）
+            log(logger, "聊一聊：尝试点击最新一条消息气泡")
+            val curInput = findChatInput(root(), w, h)
+            val curInputTop = if (curInput != null) ChatNodes.bounds(curInput).top else h
+            val lastMsg = findLastClickableMessage(root(), h, curInputTop)
+            if (lastMsg != null) {
+                tapped = performTapOnNode(lastMsg)
+            }
+        }
+        if (!tapped) {
             log(logger, "聊一聊：未能点击聊天中的链接，回退普通流程")
             return false
         }
@@ -187,6 +197,26 @@ object ChatAuto {
             }
         }
         return false
+    }
+
+    /** 找输入栏上方最新一条可点击的消息气泡（兜底点刚发的卡片消息） */
+    private fun findLastClickableMessage(root: AccessibilityNodeInfo?, h: Int, inputTop: Int): AccessibilityNodeInfo? {
+        val nodes = ChatNodes.collect(root)
+        var best: AccessibilityNodeInfo? = null
+        var bestBottom = Int.MIN_VALUE
+        for (n in nodes) {
+            if (!runCatching { n.isClickable }.getOrDefault(false)) continue
+            val r = ChatNodes.bounds(n)
+            if (r.isEmpty) continue
+            if (r.bottom > inputTop - 20) continue
+            if (r.top < 0 || r.height() < 40 || r.height() > h * 55 / 100) continue
+            if (r.width() < 40) continue
+            if (r.bottom > bestBottom) {
+                bestBottom = r.bottom
+                best = n
+            }
+        }
+        return best
     }
 
     /** 找聊天里刚发送的链接消息节点（取最靠下、且在输入框上方） */
