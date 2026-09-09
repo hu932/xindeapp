@@ -100,6 +100,20 @@ object ChatAuto {
             return false
         }
 
+        // 账号未验证手机号会限制聊天（Shopee 顶部/输入区会提示）
+        val verifyKeys = listOf(
+            "驗證您的電話號碼", "驗證電話號碼", "驗證電話", "驗證手機號",
+            "電話號碼", "电话验证", "验证手机号", "verify your phone"
+        )
+        val hitVerify = ChatNodes.collect(root()).any {
+            ChatNodes.containsAny(ChatNodes.textOf(it), verifyKeys) != null
+        }
+        if (hitVerify) {
+            log(logger, "聊一聊：Shopee 提示需先验证手机号才能聊天，无法聊一聊；回退普通流程")
+            return false
+        }
+        val inputRect = Rect(ChatNodes.bounds(input))
+
         // 2) 聚焦并填入链接
         log(logger, "聊一聊：填入链接")
         runCatching { input.performAction(AccessibilityNodeInfo.ACTION_FOCUS) }
@@ -115,9 +129,9 @@ object ChatAuto {
         delay(350)
 
         // 3) 发送
-        val sent = tapSend(logger)
+        val sent = tapSend(logger, inputRect)
         if (!sent) {
-            log(logger, "聊一聊：找不到发送按钮（OCR也未命中），链接已填入，回退普通流程")
+            log(logger, "聊一聊：找不到发送按钮（OCR/几何也未命中），链接已填入，回退普通流程")
             return false
         }
         log(logger, "聊一聊：已发送 $link")
@@ -146,8 +160,8 @@ object ChatAuto {
         return true
     }
 
-    /** 发送按钮：节点文本优先，OCR兜底 */
-    private suspend fun tapSend(logger: ((String) -> Unit)?): Boolean {
+    /** 发送按钮：节点文本优先，OCR兜底，最后几何点输入栏右侧(纯图标) */
+    private suspend fun tapSend(logger: ((String) -> Unit)?, inputRect: Rect?): Boolean {
         val (w, h) = screen().x to screen().y
         val nodes = ChatNodes.collect(root())
         var btn: AccessibilityNodeInfo? = null
@@ -167,11 +181,24 @@ object ChatAuto {
             log(logger, "聊一聊：点击发送按钮")
             return ChatNodes.performClick(btn)
         }
-        // OCR 兜底
-        val rect = ocrFindText(sendKeys, minY = h * 45 / 100, preferBottom = true) ?: return false
-        log(logger, "聊一聊：OCR识别发送按钮并点击")
-        svc()?.tap(rect.centerX(), rect.centerY())
-        return true
+        // OCR 兜底（文字发送按钮）
+        val rect = ocrFindText(sendKeys, minY = h * 45 / 100, preferBottom = true)
+        if (rect != null) {
+            log(logger, "聊一聊：OCR识别发送按钮并点击")
+            svc()?.tap(rect.centerX(), rect.centerY())
+            return true
+        }
+        // 几何兜底：Shopee 发送按钮常是纯图标，点输入栏最右侧
+        if (inputRect != null && !inputRect.isEmpty) {
+            val screenW = screen().x
+            val x = screenW - 42
+            if (x > 0) {
+                svc()?.tap(x, inputRect.centerY())
+                log(logger, "聊一聊：几何点击输入栏右侧发送图标")
+                return true
+            }
+        }
+        return false
     }
 
     /** 找聊天里刚发送的链接消息节点（取最靠下、且在输入框上方） */
