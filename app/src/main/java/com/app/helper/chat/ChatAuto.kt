@@ -18,6 +18,7 @@ object ChatAuto {
     private const val TAG = "ChatAuto"
 
     val searchSheetKeys = listOf(
+        "以圖搜圖結果", "以图搜图结果", "圖片搜尋結果", "搜圖結果", "搜图结果",
         "以圖搜圖", "以图搜图", "搜圖", "搜图", "圖片搜尋", "图片搜索", "圖片搜索",
         "相似商品", "相似产品", "相似宝贝", "相关商品", "相關商品", "找相似",
         "image search", "similar product", "shop similar"
@@ -280,15 +281,17 @@ object ChatAuto {
         // 视图文本找标题
         val sheetNode = findSearchSheetNode(w, h)
         if (sheetNode != null) {
-            log(logger, "聊一聊：识别到搜图页「${ChatNodes.textOf(sheetNode).trim()}」，先关闭再返回")
+            log(logger, "聊一聊：识别到搜图页「${ChatNodes.textOf(sheetNode).trim()}」，点 × 关闭后再返回")
             dismissSheet(logger, ChatNodes.bounds(sheetNode))
+            tapCloseGlyph(logger, ChatNodes.bounds(sheetNode))
             return true
         }
         // OCR 找标题
-        val ocrRect = ocrFindText(searchSheetKeys, minY = (h * 0.12).toInt(), maxY = (h * 0.86).toInt())
+        val ocrRect = ocrFindText(searchSheetKeys, minY = (h * 12 / 100), maxY = (h * 88) / 100)
         if (ocrRect != null) {
-            log(logger, "聊一聊：OCR识别到搜图页标题，先关闭再返回")
+            log(logger, "聊一聊：OCR识别到搜图页标题，点 × 关闭后再返回")
             dismissSheet(logger, ocrRect)
+            tapCloseGlyph(logger, ocrRect)
             return true
         }
         return false
@@ -302,8 +305,11 @@ object ChatAuto {
             val t = ChatNodes.textOf(n)
             if (t.length > 80) continue
             if (ChatNodes.containsAny(t, searchSheetKeys) == null) continue
-            val r = ChatNodes.bounds(n)
-            if (r.top < h * 12 / 100 || r.bottom > h * 86 / 100) continue
+            val lower = t.lowercase()
+            val resultMarker = lower.contains("結果") || lower.contains("结果") || lower.contains("result")
+            val minGate = if (resultMarker) h * 15 / 1000 else h * 12 / 100
+            if (r.top < minGate || r.bottom > h * 88 / 100) continue
+            if (r.height() > h * 400 || r.bottom > h * 86 / 100) continue
             if (r.height() > h * 35 / 100) continue
             val delta = Math.abs(r.centerY() - h * 0.4)
             val score = 1.0 / (1.0 + delta)
@@ -313,10 +319,8 @@ object ChatAuto {
             }
         }
         return best
-    }
-
-    private suspend fun dismissSheet(logger: ((String) -> Unit)?, titleRect: Rect) {
-        val (w, h) = screen().x to screen().y
+    }w = screen().x
+        val h = screen().y
         // 1) 标题行附近的 取消/完成/關閉
         val dismissNode = findDismissNear(titleRect)
         if (dismissNode != null) {
@@ -324,16 +328,56 @@ object ChatAuto {
             log(logger, "聊一聊：点击搜图页关闭/取消按钮")
             return
         }
-        // 2) 标题较靠顶 → 右上 X；标题在中部(bottom sheet) → 点 sheet 上方暗区
-        val titleNearTop = titleRect.top < h * 22 / 100
-        if (titleNearTop) {
-            val x = w - 48
-            val y = (titleRect.top / 2).coerceAtLeast(40)
-            svc()?.tap(x, y)
-            log(logger, "聊一聊：点击搜图页右上角关闭")
+        // 2) 标题行最右侧 ×：不论靠顶整页还是半屏层都点（标题行中线、右缘内 36；失败由外层循环换候选重试）
+        val rowY = titleRect.centerY()
+        if (rowY > 0) {
+            svc()?.tap(w - 36, rowY)
+            log(logger, "聊一聊：点击搜图页标题行右侧 ×(x=${w - 36},y=$rowY)")
             return
         }
-        val sheetTop = (titleRect.top - 30).coerceAtLeast(0)
+        // 3) 半屏层兜底：点 sheet 上方暗区
+        val titleNearTop = titleRect.top < h * 22 / 100
+        if (!titleNearTop) {
+            val sheetTop = (titleRect.top - 30).coerceAtLeast(0)
+            val tapY = (sheetTop / 2).coerceAtLeast(60).coerceAtMost(h * 40 / 100)
+            svc()?.tap(w / 2, tapY)
+            log(logger, "聊一聊：点击搜图页上方暗区关闭")
+        }
+    }
+
+    // OCR 全屏找关闭符（×/✕/X/关闭/取消）并点击（标题行附近优先）
+    private suspend fun tapCloseGlyph(logger: ((String) -> Unit)?, titleRect: Rect?) {
+        val items = ocrItems()
+        val tokens = listOf("×", "✕", "✖", "X", "x", "close", "Close", "取消", "关闭", "關閉", "cancel", "done", "Done")
+        val h = screen().y
+        var best: OcrItem? = null
+        var bestDelta = Int.MAX_VALUE
+        for (it in items) {
+            val t = it.text.trim()
+            if (t.isEmpty() || t.length > 12) continue
+            val match = tokens.any { tok -> t == tok || t.equals(tok, ignoreCase = true) }
+            if (!match) continue
+            val r = it.bounds
+            val near: Boolean
+            val delta: Int
+            if (titleRect != null && !titleRect.isEmpty) {
+                val d = r.centerY() - titleRect.centerY()
+                delta = if (d < 0) -d else d
+                near = delta <= 260
+            } else {
+                delta = r.top
+                near = r.top <= h * 40 / 100
+            }
+            if (!near) continue
+            if (delta < bestDelta) {
+                bestDelta = delta
+                best = it
+            }
+        }
+        best?.let {
+            svc()?.tap(it.bounds.centerX(), it.bounds.centerY())
+            log(logger, "聊一聊：OCR点击关闭符「${it.text}」")
+        }- 30).coerceAtLeast(0)
         val tapY = (sheetTop / 2).coerceAtLeast(60).coerceAtMost(h * 40 / 100)
         svc()?.tap(w / 2, tapY)
         log(logger, "聊一聊：点击搜图页上方暗区关闭")
