@@ -338,9 +338,9 @@ object ChatAuto {
             val lower = t.lowercase()
             val resultMarker = lower.contains("結果") || lower.contains("结果") || lower.contains("result")
             val minGate = if (resultMarker) h * 15 / 1000 else h * 12 / 100
+            val r = ChatNodes.bounds(n)
             if (r.top < minGate || r.bottom > h * 88 / 100) continue
-            if (r.height() > h * 400 || r.bottom > h * 86 / 100) continue
-            if (r.height() > h * 35 / 100) continue
+            if (r.height() > h * 40 / 100) continue
             val delta = Math.abs(r.centerY() - h * 0.4)
             val score = 1.0 / (1.0 + delta)
             if (score > bestScore) {
@@ -349,7 +349,10 @@ object ChatAuto {
             }
         }
         return best
-    }w = screen().x
+    }
+
+    private suspend fun dismissSheet(logger: ((String) -> Unit)?, titleRect: Rect) {
+        val w = screen().x
         val h = screen().y
         // 1) 标题行附近的 取消/完成/關閉
         val dismissNode = findDismissNear(titleRect)
@@ -358,7 +361,7 @@ object ChatAuto {
             log(logger, "聊一聊：点击搜图页关闭/取消按钮")
             return
         }
-        // 2) 标题行最右侧 ×：不论靠顶整页还是半屏层都点（标题行中线、右缘内 36；失败由外层循环换候选重试）
+        // 2) 标题行最右侧 ×：不论靠顶整页还是半屏层都点（标题行中线、右缘内 36）
         val rowY = titleRect.centerY()
         if (rowY > 0) {
             svc()?.tap(w - 36, rowY)
@@ -407,10 +410,7 @@ object ChatAuto {
         best?.let {
             svc()?.tap(it.bounds.centerX(), it.bounds.centerY())
             log(logger, "聊一聊：OCR点击关闭符「${it.text}」")
-        }- 30).coerceAtLeast(0)
-        val tapY = (sheetTop / 2).coerceAtLeast(60).coerceAtMost(h * 40 / 100)
-        svc()?.tap(w / 2, tapY)
-        log(logger, "聊一聊：点击搜图页上方暗区关闭")
+        }
     }
 
     private fun findDismissNear(titleRect: Rect): AccessibilityNodeInfo? {
