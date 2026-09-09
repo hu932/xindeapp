@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Ajie</string>
+    <string name="acc_service_desc">用于在 Shopee 聊天页自动发送商品链接并点击、识别搜图页并返回聊天（聊一聊功能）。</string>
 </resources>

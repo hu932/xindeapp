@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.graphics.Color
 import android.provider.Settings
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -21,6 +22,7 @@ import com.app.helper.R
 import com.app.helper.databinding.ActivityMainBinding
 import com.app.helper.network.ApiService
 import com.app.helper.network.UpdateResponse
+import com.app.helper.service.ChatAccessibilityService
 import com.app.helper.service.TaskService
 import com.app.helper.ui.login.LoginActivity
 import com.app.helper.util.FingerprintManager
@@ -74,6 +76,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnDelay3060.setOnClickListener { applyDelayPreset(30, 60) }
         refreshDelayUI()
         setupPauseConfig()
+        setupChatMode()
         setupSilentMode()
         setupTabs()
         setupFingerprintPage()
@@ -423,6 +426,49 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ==================== 聊一聊（OCR识别） ====================
+
+    private fun setupChatMode() {
+        val prefs = getSharedPreferences("task_config", MODE_PRIVATE)
+        binding.switchChatMode.isChecked = prefs.getBoolean("chat_mode", false)
+        binding.switchChatMode.setOnCheckedChangeListener { _, _ -> pushChatMode() }
+        binding.btnChatPermission.setOnClickListener {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        }
+        refreshChatStatus()
+    }
+
+    private fun pushChatMode() {
+        val prefs = getSharedPreferences("task_config", MODE_PRIVATE)
+        val enabled = binding.switchChatMode.isChecked
+        prefs.edit().putBoolean("chat_mode", enabled).apply()
+        if (TaskService.isRunning) {
+            val intent = Intent(this, TaskService::class.java).apply {
+                action = "SET_CHAT_MODE"
+                putExtra("chat_mode", enabled)
+            }
+            startService(intent)
+        }
+        refreshChatStatus()
+    }
+
+    private fun refreshChatStatus() {
+        val prefs = getSharedPreferences("task_config", MODE_PRIVATE)
+        val on = prefs.getBoolean("chat_mode", false)
+        val ready = ChatAccessibilityService.isReady()
+        val text = when {
+            !on -> "未开启（开启后需保持 Shopee 停留在聊天页）"
+            ready -> "无障碍已连接：可识别输入框/发送/链接/搜图页；Android 11+ 支持像素OCR"
+            else -> "已开启，但无障碍未连接——请点下方按钮到系统设置开启【Ajie 聊一聊助手】"
+        }
+        binding.tvChatStatus.text = text
+        binding.tvChatStatus.setTextColor(
+            if (on && !ready) Color.parseColor("#E74C3C")
+            else if (on) Color.parseColor("#27AE60")
+            else Color.parseColor("#E67E22")
+        )
+    }
+
     private fun registerUpdateReceiver() {        updateReceiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
                 val isBlocked = intent.getBooleanExtra("blocked", false)
@@ -576,6 +622,7 @@ class MainActivity : AppCompatActivity() {
         if (TaskService.isRunning) {
             try { sendBroadcast(Intent("com.app.helper.STATS_QUERY")) } catch (_: Exception) {}
         }
+        try { refreshChatStatus() } catch (_: Exception) {}
     }
 
     private fun showDelayConfigDialog() {

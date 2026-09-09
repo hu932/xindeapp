@@ -24,6 +24,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.app.helper.R
+import com.app.helper.chat.ChatAuto
 import com.app.helper.network.ApiConfig
 import com.app.helper.network.ApiService
 import com.app.helper.util.TokenManager
@@ -90,8 +91,10 @@ class TaskService : android.app.Service() {
     private val pauseCount get() = prefs.getInt("pause_count", 30)
     private val pauseMinutes get() = prefs.getInt("pause_minutes", 30)
     private val silentMode get() = prefs.getBoolean("silent_mode", false)
+    private val chatMode get() = prefs.getBoolean("chat_mode", false)
     private var sessionUploadCount = 0
     private var pauseJob: Job? = null
+    @Volatile private var usedChatFlow = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -142,6 +145,14 @@ class TaskService : android.app.Service() {
                 val enabled = intent.getBooleanExtra("silent_mode", false)
                 prefs.edit().putBoolean("silent_mode", enabled).apply()
                 updateFloatStatus(if (enabled) "已开启静默模式（不跳转商品页）" else "已关闭静默模式（跳转商品页）")
+            }
+            "SET_CHAT_MODE" -> {
+                val enabled = intent.getBooleanExtra("chat_mode", false)
+                prefs.edit().putBoolean("chat_mode", enabled).apply()
+                updateFloatStatus(if (enabled) "已开启聊一聊（需在Shopee聊天页）" else "已关闭聊一聊")
+                if (enabled && !ChatAccessibilityService.isReady()) {
+                    updateFloatStatus("聊一聊需先在系统设置开启无障碍【Ajie 聊一聊助手】")
+                }
             }
         }
         return START_STICKY
@@ -377,11 +388,26 @@ class TaskService : android.app.Service() {
                 currentShopId = task.parseShopId()
                 currentItemId = task.parseItemId()
                 pendingFileContent = null
+                usedChatFlow = false
 
                 updateFloatStatus("已领取任务\nshop=$currentShopId item=$currentItemId")
                 broadcastStats()
                 delay(800)
-                launchShopeeProduct()
+
+                // 聊一聊模式：发送链接到当前聊天并点击打开商品页（环境App照常抓包）；不可用则回退普通流程
+                val chatWanted = chatMode && !silentMode
+                if (chatWanted) {
+                    usedChatFlow = ChatAuto.openTaskLinkInChat(
+                        logger = { updateFloatStatus(it) },
+                        link = "https://shopee.tw/product/$currentShopId/$currentItemId"
+                    )
+                    if (!usedChatFlow) {
+                        updateFloatStatus("聊一聊不可用，回退普通流程打开商品页")
+                        launchShopeeProduct()
+                    }
+                } else {
+                    launchShopeeProduct()
+                }
 
                 updateFloatStatus("等待数据回传...")
                 if (!waitForFileContent()) return@launch
@@ -493,8 +519,16 @@ class TaskService : android.app.Service() {
             if (response.isApi1Success) {
                 uploadCount++
                 sessionUploadCount++
-                updateFloatStatus("上传成功！")
                 Log.d(TAG, "Submit OK: task=$currentTaskId count=$uploadCount")
+                // 聊一聊：上传成功后智能返回聊天页（识别并关闭搜图页后再返回）
+                if (chatMode && usedChatFlow && ChatAccessibilityService.isReady()) {
+                    updateFloatStatus("上传成功！返回聊天页...")
+                    ChatAuto.returnToChat(logger = { updateFloatStatus(it) })
+                    usedChatFlow = false
+                    updateFloatStatus("上传成功！已返回聊天")
+                } else {
+                    updateFloatStatus("上传成功！")
+                }
             } else {
                 failedCount++
                 updateFloatStatus("上传失败: ${response.msg ?: "未知错误"}")
