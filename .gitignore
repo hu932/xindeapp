@@ -23,5 +23,9 @@ local.properties
 # decompile reference snippets (not part of the build)
 csyx_reference_v_*.java
 
+# server runtime state — never commit these
+/app/.auth_hash
+/app/accounts_share_data.php
+
 # pasted screenshots / scratch images at repo root
 /image-*.png

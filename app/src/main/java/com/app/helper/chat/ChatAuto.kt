@@ -17,11 +17,18 @@ object ChatAuto {
 
     private const val TAG = "ChatAuto"
 
+    /**
+     * 搜图页/结果页的**专属**标题。故意不含「相似商品 / 相關商品 / 找相似」——
+     * 这些词在商品页上也有（相似商品栏目），放进来自动关窗会误点商品页。
+     */
     val searchSheetKeys = listOf(
-        "以圖搜圖結果", "以图搜图结果", "圖片搜尋結果", "搜圖結果", "搜图结果",
-        "以圖搜圖", "以图搜图", "搜圖", "搜图", "圖片搜尋", "图片搜索", "圖片搜索",
-        "相似商品", "相似产品", "相似宝贝", "相关商品", "相關商品", "找相似",
-        "image search", "similar product", "shop similar"
+        "以圖搜圖結果", "以图搜图结果", "圖片搜尋結果", "图片搜索结果", "搜圖結果", "搜图结果",
+        "以圖搜圖", "以图搜图", "圖片搜尋", "图片搜索", "圖片搜索", "搜圖", "搜图",
+        "image search", "shop similar"
+    )
+    /** 弱信号：商品页也有，只有在「标题位置 + 附近有关闭按钮」时才算搜图页 */
+    val searchSheetWeakKeys = listOf(
+        "相似商品", "相似产品", "相似宝贝", "相关商品", "相關商品", "找相似", "similar product"
     )
     val sendKeys = listOf("发送", "發送", "送出", "傳送", "Send", "send")
     val inputHintKeys = listOf(
@@ -30,6 +37,20 @@ object ChatAuto {
     )
     val dismissKeys = listOf("取消", "关闭", "關閉", "完成", "Done", "Cancel", "Close", "close")
     val backKeys = listOf("返回", "上一頁", "上一页", "Back", "back")
+
+    /** 聊天输入栏旁边的控件，用来确认「这确实是聊天页」 */
+    val chatBarKeys = listOf(
+        "相冊", "相册", "相簿", "相機", "相机", "Camera", "camera",
+        "表情", "emoji", "Emoji", "貼圖", "贴图", "禮物", "礼物", "更多", "More"
+    )
+    /**
+     * 商品页特征文案，用来判断「还停在商品页、没退回聊天」。
+     * 只放商品页独有的词；像「領取」这种聊天里的优惠券卡片也有，不能放。
+     */
+    val productPageKeys = listOf(
+        "加入購物車", "加入购物车", "直接購買", "直接购买", "立即購買", "立即购买",
+        "查看配送資訊", "查看配送信息", "領取優惠券"
+    )
 
     // ---------- 基础 ----------
     private fun svc(): ChatAccessibilityService? = ChatAccessibilityService.current()
@@ -87,8 +108,14 @@ object ChatAuto {
         }
         val (w, h) = screen().x to screen().y
 
-        // 1) 找输入框；找不到则 OCR 点一下输入区再重扫
+        // 1) 找输入框。找不到多半是上一个任务结束后没回到聊天页（还停在商品页/搜图页）
         var input = findChatInput(root(), w, h)
+        if (input == null && isProductPageVisible()) {
+            log(logger, "聊一聊：当前还停在商品页，先返回聊天页再发送")
+            returnToChat(logger)
+            delay(600)
+            input = findChatInput(root(), w, h)
+        }
         if (input == null) {
             log(logger, "聊一聊：未找到输入框，尝试OCR定位输入区")
             if (tapOcrInputArea(logger)) {
@@ -308,40 +335,111 @@ object ChatAuto {
     }
 
     // ---------- 返回聊天（含搜图页处理） ----------
+    /**
+     * 上传完数据后回到聊天页。按实测流程写成确定性步骤：
+     *   1) 有搜图页/中间浮层 → 先关掉（可能连着弹，最多关 3 轮）
+     *   2) 返回一次
+     *   3) 若返回后仍不是聊天页（例如又弹了搜图页）→ 关掉再返回，最多补 2 轮
+     *
+     * 注意：这里**不能**在第一次迭代就判定「已在聊天页」直接返回 ——
+     * 上传完数据那一刻界面上是商品页，那个判定会误判成已回聊天，导致一次都不返回。
+     */
     suspend fun returnToChat(logger: ((String) -> Unit)?) {
         if (svc() == null) return
         val (w, h) = screen().x to screen().y
-        repeat(8) { i ->
-            val r = root() ?: run { delay(500); return@repeat }
-            // 1) 先识别并关闭搜图页/中间浮层
-            if (closeSearchSheetIfPresent(logger)) {
-                delay(700)
-                return@repeat
-            }
-            // 2) 已在聊天页 → 若刚做过动作，OCR 确认一次无残留浮层后结束
-            if (isChatPage(r, w, h)) {
-                if (i == 0) {
-                    log(logger, "聊一聊：已返回聊天界面")
-                    return
-                }
-                if (ocrConfirmNoSheet(logger)) {
-                    log(logger, "聊一聊：已返回聊天界面")
-                    return
-                }
-                delay(500)
-                return@repeat
-            }
-            // 3) 做一步返回（找返回控件 → 系统返回）
-            val backNode = findBackControl(r, w)
-            if (backNode != null) {
-                ChatNodes.performClick(backNode)
-                log(logger, "聊一聊：点击返回")
-            } else {
-                svc()?.globalBack()
-                log(logger, "聊一聊：系统返回")
-            }
-            delay(650)
+
+        // 0) 确实已经在聊天页就不用动（严格判定，避免商品页被误判）
+        if (looksLikeChatPage(w, h)) {
+            log(logger, "聊一聊：已在聊天界面")
+            return
         }
+
+        // 1) 关掉搜图页 / 中间浮层（没有就立刻跳出，别白做 OCR）
+        var closedAny = false
+        for (i in 0 until 3) {
+            if (!closeSearchSheetIfPresent(logger)) break
+            closedAny = true
+            delay(800)
+        }
+        if (closedAny) log(logger, "聊一聊：搜图页已关闭")
+
+        // 2) 搜图页关掉后可能已经回到聊天页了
+        if (looksLikeChatPage(w, h)) {
+            log(logger, "聊一聊：已返回聊天界面")
+            return
+        }
+
+        // 3) 返回一次
+        backOnce(logger)
+        delay(900)
+
+        // 4) 校验 + 补救
+        repeat(2) { i ->
+            if (closeSearchSheetIfPresent(logger)) {
+                log(logger, "聊一聊：又出现搜图页，关闭后再返回一次")
+                delay(800)
+                backOnce(logger)
+                delay(900)
+                return@repeat
+            }
+            if (looksLikeChatPage(w, h)) {
+                log(logger, "聊一聊：已返回聊天界面")
+                return
+            }
+            if (i == 0) {
+                log(logger, "聊一聊：还不是聊天页，再返回一次")
+                backOnce(logger)
+                delay(900)
+            }
+        }
+        log(logger, "聊一聊：返回聊天页结束")
+    }
+
+    /** 返回一步：优先点页面左上角返回键，找不到就按系统返回 */
+    private suspend fun backOnce(logger: ((String) -> Unit)?) {
+        val w = screen().x
+        val node = findBackControl(root(), w)
+        if (node != null) {
+            ChatNodes.performClick(node)
+            log(logger, "聊一聊：点击返回")
+        } else {
+            svc()?.globalBack()
+            log(logger, "聊一聊：系统返回")
+        }
+    }
+
+    /**
+     * 严格判定「就在聊天页」。
+     * 判据：屏幕上没有商品页特征、也没有搜图页标题，且底部有可编辑输入框。
+     * 这样商品页（有「加入購物車/直接購買」）和搜图页都不会被误判成聊天页。
+     */
+    private fun looksLikeChatPage(w: Int, h: Int): Boolean {
+        if (isProductPageVisible()) return false   // 商品页特征 → 不是聊天页
+        if (findSearchSheetNode(w, h) != null) return false // 有搜图页 → 不是聊天页
+        val r = root() ?: return false
+        val input = findChatInput(r, w, h) ?: return false
+        val ib = ChatNodes.bounds(input)
+        if (ib.height() <= 0) return false
+        if (ChatNodes.containsAny(ChatNodes.textOf(input), inputHintKeys) != null) return true
+        // 输入框上下 3% 屏高范围内有发送/相册/表情等控件 → 就是聊天输入栏
+        for (n in ChatNodes.collect(r)) {
+            val b = ChatNodes.bounds(n)
+            if (b.height() <= 0) continue
+            if (b.centerY() < ib.top - h * 3 / 100 || b.centerY() > ib.bottom + h * 3 / 100) continue
+            val t = ChatNodes.textOf(n)
+            if (ChatNodes.containsAny(t, sendKeys) != null) return true
+            if (ChatNodes.containsAny(t, chatBarKeys) != null) return true
+        }
+        // 没商品页特征、没搜图页，底部又有输入框 → 认定为聊天页
+        return true
+    }
+
+    /** 是否还停在商品页（用于「没回到聊天页」时自救） */
+    fun isProductPageVisible(): Boolean {
+        for (n in ChatNodes.collect(root())) {
+            if (ChatNodes.containsAny(ChatNodes.textOf(n), productPageKeys) != null) return true
+        }
+        return false
     }
 
     private fun findBackControl(root: AccessibilityNodeInfo?, w: Int): AccessibilityNodeInfo? {
@@ -386,13 +484,17 @@ object ChatAuto {
         for (n in nodes) {
             val t = ChatNodes.textOf(n)
             if (t.length > 80) continue
-            if (ChatNodes.containsAny(t, searchSheetKeys) == null) continue
+            val strong = ChatNodes.containsAny(t, searchSheetKeys) != null
+            val weak = !strong && ChatNodes.containsAny(t, searchSheetWeakKeys) != null
+            if (!strong && !weak) continue
             val lower = t.lowercase()
             val resultMarker = lower.contains("結果") || lower.contains("结果") || lower.contains("result")
             val minGate = if (resultMarker) h * 15 / 1000 else h * 12 / 100
             val r = ChatNodes.bounds(n)
             if (r.top < minGate || r.bottom > h * 88 / 100) continue
             if (r.height() > h * 40 / 100) continue
+            // 弱信号（「相似商品」这种）必须附近真的有关闭/取消按钮，否则很可能只是商品页栏目
+            if (weak && findDismissNear(r) == null) continue
             val delta = Math.abs(r.centerY() - h * 0.4)
             val score = 1.0 / (1.0 + delta)
             if (score > bestScore) {
@@ -553,16 +655,5 @@ object ChatAuto {
             return true
         }
         return false
-    }
-
-    private suspend fun ocrConfirmNoSheet(logger: ((String) -> Unit)?): Boolean {
-        val h = screen().y
-        val sheet = ocrFindText(searchSheetKeys, minY = (h * 0.12).toInt(), maxY = (h * 0.86).toInt())
-        if (sheet != null) {
-            log(logger, "聊一聊：OCR仍检测到搜图页，继续关闭")
-            dismissSheet(logger, sheet)
-            return false
-        }
-        return true
     }
 }

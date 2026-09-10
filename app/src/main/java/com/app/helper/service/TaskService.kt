@@ -410,7 +410,14 @@ class TaskService : android.app.Service() {
                 }
 
                 updateFloatStatus("等待数据回传...")
-                if (!waitForFileContent()) return@launch
+                if (!waitForFileContent()) {
+                    // 回传超时/失败也要先回聊天页，否则下个任务会在商品页上开始。
+                    // 用 isUploading 挡住倒计时，避免还没回到聊天页就开始领下一个任务。
+                    isUploading = true
+                    returnToChatIfNeeded("回传失败，返回聊天页...")
+                    isUploading = false
+                    return@launch
+                }
 
                 val content = pendingFileContent!!
                 pendingFileContent = null
@@ -520,11 +527,8 @@ class TaskService : android.app.Service() {
                 uploadCount++
                 sessionUploadCount++
                 Log.d(TAG, "Submit OK: task=$currentTaskId count=$uploadCount")
-                // 聊一聊：上传成功后智能返回聊天页（识别并关闭搜图页后再返回）
-                if (chatMode && usedChatFlow && ChatAccessibilityService.isReady()) {
-                    updateFloatStatus("上传成功！返回聊天页...")
-                    ChatAuto.returnToChat(logger = { updateFloatStatus(it) })
-                    usedChatFlow = false
+                // 聊一聊：上传成功后必须回到聊天页，否则下个任务会在商品页上开始
+                if (returnToChatIfNeeded("上传成功！返回聊天页...")) {
                     updateFloatStatus("上传成功！已返回聊天")
                 } else {
                     updateFloatStatus("上传成功！")
@@ -532,16 +536,33 @@ class TaskService : android.app.Service() {
             } else {
                 failedCount++
                 updateFloatStatus("上传失败: ${response.msg ?: "未知错误"}")
+                // 上传失败也要回聊天页，从聊天页继续下一个任务
+                returnToChatIfNeeded("返回聊天页...")
             }
         } catch (e: Exception) {
             failedCount++
             updateFloatStatus("上传异常: ${e.message}")
+            returnToChatIfNeeded("异常，返回聊天页...")
         } finally {
             isUploading = false
             currentTaskId = ""
             broadcastStats()
             if (isAutoRunning && !triggerPauseRestIfNeeded()) startNextTaskCycle()
         }
+    }
+
+    /**
+     * 聊一聊：回到聊天页。
+     * 成功/失败/超时都要回，否则下一个任务会在商品页（或搜图页）上开始，
+     * 现象就是面板打出「聊一聊：未找到输入框」然后回退成普通跳转。
+     * @return true 表示这次确实执行了返回
+     */
+    private suspend fun returnToChatIfNeeded(reason: String): Boolean {
+        if (!chatMode || !usedChatFlow || !ChatAccessibilityService.isReady()) return false
+        usedChatFlow = false
+        updateFloatStatus(reason)
+        ChatAuto.returnToChat(logger = { updateFloatStatus(it) })
+        return true
     }
 
     private fun triggerPauseRestIfNeeded(): Boolean {
