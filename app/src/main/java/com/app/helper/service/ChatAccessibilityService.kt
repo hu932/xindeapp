@@ -12,6 +12,7 @@ import android.os.Looper
 import android.util.Log
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityWindowInfo
 import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
 
@@ -72,15 +73,39 @@ class ChatAccessibilityService : AccessibilityService() {
     fun screenSize(): Point = displaySize
 
     /** 前台窗口是否为 Shopee */
-    fun isShopeeForeground(): Boolean {
-        val root = rootInActiveWindow ?: return false
-        return isShopeePackage(root.packageName?.toString())
+    fun isShopeeForeground(): Boolean = activeShopeeRoot() != null
+
+    /**
+     * 取 Shopee 前台窗口的根节点（非 Shopee 返回 null）。
+     * 注意：软键盘(IME)/系统弹窗会抢占 active window，此时 rootInActiveWindow 不是 Shopee
+     * （或直接被 packageNames 过滤成 null）。所以再从窗口列表里兜底找 Shopee 应用窗口，
+     * 否则「发送链接后找不到消息气泡」会整段失效。
+     */
+    fun activeShopeeRoot(): android.view.accessibility.AccessibilityNodeInfo? {
+        val active = rootInActiveWindow
+        if (active != null && isShopeePackage(active.packageName?.toString())) return active
+        return shopeeWindowRoot()
     }
 
-    /** 取 Shopee 前台窗口的根节点（非 Shopee 返回 null） */
-    fun activeShopeeRoot(): android.view.accessibility.AccessibilityNodeInfo? {
-        val root = rootInActiveWindow ?: return null
-        return root.takeIf { isShopeePackage(it.packageName?.toString()) }
+    private fun shopeeWindowRoot(): android.view.accessibility.AccessibilityNodeInfo? {
+        val ws = runCatching { windows }.getOrNull() ?: return null
+        var best: android.view.accessibility.AccessibilityNodeInfo? = null
+        var bestArea = Long.MIN_VALUE
+        for (win in ws) {
+            val root = runCatching { win?.root }.getOrNull() ?: continue
+            if (!isShopeePackage(root.packageName?.toString())) continue
+            // 只要应用窗口，排除输入法/系统浮窗
+            val type = runCatching { win?.type }.getOrDefault(-1)
+            if (type != AccessibilityWindowInfo.TYPE_APPLICATION) continue
+            val r = android.graphics.Rect()
+            runCatching { root.getBoundsInScreen(r) }
+            val area = r.width().toLong() * r.height().toLong()
+            if (area > bestArea) {
+                bestArea = area
+                best = root
+            }
+        }
+        return best
     }
 
     private fun isShopeePackage(pkg: String?): Boolean {

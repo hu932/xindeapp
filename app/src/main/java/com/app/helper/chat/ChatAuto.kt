@@ -125,30 +125,61 @@ object ChatAuto {
         log(logger, "聊一聊：已发送 $link")
         delay(1200)
 
-        // 4) 找刚发的链接消息并点击（等待消息渲染，最多 4s）
+        // 4) 点击刚发送的那一条消息。
+        //    Shopee 常把链接渲染成卡片（节点里没有原文），若只按「文本包含链接」找节点，
+        //    会命中历史里的旧链接消息 → 点开的是上一个商品。所以以「输入栏正上方最新一条消息」为准，
+        //    文本命中只用于「同在最新位置」时的精确优先。
         var tapped = false
+        var attempts = 0
+        var lastRect: Rect? = null
         repeat(8) {
             if (tapped) return@repeat
-            val linkNode = findLinkMessage(root(), w, h, link)
-            if (linkNode != null) {
-                tapped = performTapOnNode(linkNode)
-            } else {
+            val r = root()
+            val input = findChatInput(r, w, h)
+            if (input == null) {
+                // 已经不在聊天页（可能上一次点击已生效）→ 不再乱点，交给下方校验
+                if (attempts > 0) return@repeat
                 delay(500)
+                return@repeat
+            }
+            val inputTop = ChatNodes.bounds(input).top
+            val textNode = findLinkMessage(r, w, h, link)
+            val newest = newestMessageNode(r, h, inputTop)
+            val target = when {
+                textNode == null -> newest
+                newest == null -> textNode
+                // 取更靠下（=更新）的那个；文本节点不新于最新消息时才用文本节点
+                ChatNodes.bounds(textNode).bottom >= ChatNodes.bounds(newest).bottom -> textNode
+                else -> newest
+            }
+            if (target == null) {
+                delay(400)
+                return@repeat
+            }
+            val rect = ChatNodes.bounds(target)
+            // 重试时必须还是同一条消息，避免页面已切换后误点到别的控件
+            val prev = lastRect
+            if (prev != null && Math.abs(rect.centerY() - prev.centerY()) > 60) return@repeat
+            lastRect = Rect(rect)
+            attempts++
+            log(logger, "聊一聊：点击最新一条消息 ${rect.toShortString()}")
+            tapped = performTapOnNode(target)
+            if (!tapped) {
+                delay(400)
+                return@repeat
+            }
+            // 校验是否真的离开聊天页；仍停留在聊天页说明点了个“死”节点 → 再点一次
+            delay(1400)
+            val stillChat = root()?.let { isChatPage(it, w, h) } ?: false
+            if (stillChat && attempts < 2) {
+                log(logger, "聊一聊：点击后仍在聊天页，重试一次")
+                tapped = false
+                delay(300)
             }
         }
         if (!tapped) {
-            log(logger, "聊一聊：未在聊天中找到链接消息，尝试OCR点击链接")
+            log(logger, "聊一聊：节点未命中，尝试OCR点击最新链接")
             tapped = tapOcrLink(logger, link)
-        }
-        if (!tapped) {
-            // 兜底：Shopee 把链接渲染成卡片没有原文 → 点输入栏上方最新一条可点气泡（即刚发的消息）
-            log(logger, "聊一聊：尝试点击最新一条消息气泡")
-            val curInput = findChatInput(root(), w, h)
-            val curInputTop = if (curInput != null) ChatNodes.bounds(curInput).top else h
-            val lastMsg = findLastClickableMessage(root(), h, curInputTop)
-            if (lastMsg != null) {
-                tapped = performTapOnNode(lastMsg)
-            }
         }
         if (!tapped) {
             log(logger, "聊一聊：未能点击聊天中的链接，回退普通流程")
@@ -199,21 +230,32 @@ object ChatAuto {
         return false
     }
 
-    /** 找输入栏上方最新一条可点击的消息气泡（兜底点刚发的卡片消息） */
-    private fun findLastClickableMessage(root: AccessibilityNodeInfo?, h: Int, inputTop: Int): AccessibilityNodeInfo? {
+    /**
+     * 找输入栏正上方、最靠下（=最新）的一条可点击消息气泡。
+     * 刚发送的消息一定是最新一条；Shopee 把它渲染成卡片时节点里没有链接原文，只能靠位置判定。
+     * 同一底部区域内有多个嵌套可点节点时取最内层（面积最小），避免点到整块列表容器。
+     */
+    private fun newestMessageNode(root: AccessibilityNodeInfo?, h: Int, inputTop: Int): AccessibilityNodeInfo? {
         val nodes = ChatNodes.collect(root)
+        val screenW = screen().x
         var best: AccessibilityNodeInfo? = null
         var bestBottom = Int.MIN_VALUE
+        var bestArea = Long.MAX_VALUE
         for (n in nodes) {
             if (!runCatching { n.isClickable }.getOrDefault(false)) continue
             val r = ChatNodes.bounds(n)
             if (r.isEmpty) continue
-            if (r.bottom > inputTop - 20) continue
-            if (r.top < 0 || r.height() < 40 || r.height() > h * 55 / 100) continue
-            if (r.width() < 40) continue
-            if (r.bottom > bestBottom) {
-                bestBottom = r.bottom
+            if (r.top < 0 || r.bottom > inputTop) continue          // 必须在输入栏上方
+            if (r.height() < 40 || r.height() > h * 50 / 100) continue // 排除整块消息列表容器
+            if (r.width() < 40 || r.width() > screenW) continue
+            val area = r.width().toLong() * r.height().toLong()
+            if (best == null ||
+                r.bottom > bestBottom + 24 ||
+                (r.bottom >= bestBottom - 24 && area < bestArea)
+            ) {
                 best = n
+                bestBottom = maxOf(bestBottom, r.bottom)
+                bestArea = area
             }
         }
         return best
@@ -241,18 +283,28 @@ object ChatAuto {
     }
 
     private fun linkMatchesDigits(text: String, link: String): Boolean {
-        val item = Regex("item_id=(\\d+)").find(link)?.groupValues?.get(1)
+        val m = Regex("/product/(\\d+)/(\\d+)").find(link)
         val shop = Regex("shop_id=(\\d+)").find(link)?.groupValues?.get(1)
-            ?: Regex("/product/(\\d+)/(\\d+)").find(link)?.groupValues?.get(1)
-        if (item.isNullOrEmpty() || shop.isNullOrEmpty()) return text.contains("shopee", true)
-        return text.contains(shop) && text.contains(item)
+            ?: m?.groupValues?.get(1)
+        val item = Regex("item_id=(\\d+)").find(link)?.groupValues?.get(1)
+            ?: m?.groupValues?.get(2)
+        // 解析不出 id 时不再退化成「包含 shopee」——否则会命中历史旧链接消息，
+        // 导致点开的是上一个商品。此时返回 false，让调用方改用「最新一条消息」定位。
+        if (shop.isNullOrEmpty() || item.isNullOrEmpty()) return false
+        val t = text.replace(",", "").replace(" ", "")
+        return t.contains(shop) && t.contains(item)
     }
 
     private fun performTapOnNode(node: AccessibilityNodeInfo): Boolean {
-        if (ChatNodes.performClick(node)) return true
-        val c = ChatNodes.center(node) ?: return false
-        svc()?.tap(c[0], c[1])
-        return true
+        // 优先注入真实手势点击（更接近用户操作，链接/卡片才会被打开）；
+        // ACTION_CLICK 对某些包装节点会返回 true 但不产生实际效果。
+        val c = ChatNodes.center(node)
+        val sc = screen()
+        if (c != null && c[0] > 0 && c[0] < sc.x && c[1] > 0 && c[1] < sc.y) {
+            svc()?.tap(c[0], c[1])
+            return true
+        }
+        return ChatNodes.performClick(node)
     }
 
     // ---------- 返回聊天（含搜图页处理） ----------
