@@ -13,7 +13,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -27,6 +26,8 @@ import com.app.helper.R
 import com.app.helper.chat.ChatAuto
 import com.app.helper.network.ApiConfig
 import com.app.helper.network.ApiService
+import com.app.helper.network.ExtTask
+import com.app.helper.util.DelayPrefs
 import com.app.helper.util.TokenManager
 import kotlinx.coroutines.*
 import org.json.JSONObject
@@ -64,6 +65,7 @@ class TaskService : android.app.Service() {
     private var currentTaskId = ""
     private var currentShopId = 0L
     private var currentItemId = 0L
+    private var currentTask: ExtTask? = null
     private var statusMessage = ""
     private var uploadCount = 0
     private var failedCount = 0
@@ -85,8 +87,6 @@ class TaskService : android.app.Service() {
     @Volatile private var pendingFileContent: String? = null
 
     private val prefs by lazy { getSharedPreferences(PREF_NAME, MODE_PRIVATE) }
-    private val delayMin get() = prefs.getInt("delay_min", 15)
-    private val delayMax get() = prefs.getInt("delay_max", 35)
     private val pauseEnabled get() = prefs.getBoolean("pause_enabled", true)
     private val pauseCount get() = prefs.getInt("pause_count", 30)
     private val pauseMinutes get() = prefs.getInt("pause_minutes", 30)
@@ -121,10 +121,10 @@ class TaskService : android.app.Service() {
                 }
             }
             "SET_DELAY" -> {
-                val min = intent.getIntExtra("delay_min", 15)
-                val max = intent.getIntExtra("delay_max", 35)
-                prefs.edit().putInt("delay_min", min).putInt("delay_max", max).apply()
-                updateFloatStatus("延时已设置: ${min}-${max}秒")
+                val minMs = intent.getLongExtra("delay_min_ms", 15_000L)
+                val maxMs = intent.getLongExtra("delay_max_ms", 35_000L)
+                DelayPrefs.set(this, minMs, maxMs)
+                updateFloatStatus("延时已设置: ${DelayPrefs.formatMs(minMs)}-${DelayPrefs.formatMs(maxMs)}")
             }
             "SET_PAUSE" -> {
                 val enabled = intent.getBooleanExtra("pause_enabled", true)
@@ -213,7 +213,7 @@ class TaskService : android.app.Service() {
         tvAction?.setOnClickListener { toggleAutoTask() }
 
         try { windowManager?.addView(floatView, floatParams) } catch (e: Exception) { Log.e(TAG, "Float window failed", e) }
-        updateFloatStatus("点击【一键做任务】开始\n延时: ${delayMin}-${delayMax}秒")
+        updateFloatStatus("点击【一键做任务】开始\n延时: ${DelayPrefs.formatMs(DelayPrefs.getMinMs(this))}-${DelayPrefs.formatMs(DelayPrefs.getMaxMs(this))}")
     }
 
     private fun handleDrag(event: MotionEvent): Boolean {
@@ -253,7 +253,7 @@ class TaskService : android.app.Service() {
             .replace("自动领取任务", "领任务")
             .replace("自动执行", "自动")
             .replace("当日上传成功", "今日")
-        statusMessage = "$compactMessage\n账号:${TokenManager.getUsername()} 今日:$uploadCount"
+        statusMessage = "$compactMessage\n下发ID:${TokenManager.getUsername()} 今日:$uploadCount"
         handler.post { if (!isCollapsed) tvStatus?.text = statusMessage }
         try { sendBroadcast(Intent("com.app.helper.LOG_ACTION").putExtra("log_msg", message)) } catch (_: Exception) {}
     }
@@ -327,14 +327,9 @@ class TaskService : android.app.Service() {
         val delayMs = if (forceDelaySec != null) {
             forceDelaySec.coerceAtLeast(1) * 1000L
         } else {
-            val min = delayMin.coerceAtLeast(0)
-            val max = delayMax.coerceAtLeast(min)
-            var ms = (min..max).random() * 1000L
-            // 拟人化：25% 概率延长停留，模拟真实浏览节奏，降低风控
-            if (kotlin.random.Random.nextInt(100) < 25) {
-                ms = (ms * (1.5 + kotlin.random.Random.nextDouble() * 1.5)).toLong()
-            }
-            ms
+            val min = DelayPrefs.getMinMs(this).coerceAtLeast(0L)
+            val max = DelayPrefs.getMaxMs(this).coerceAtLeast(min)
+            if (min == max) min else kotlin.random.Random.nextLong(min, max + 1L)
         }
         val remainingDelayMs = (delayMs - alreadyWaitedMs).coerceAtLeast(0L)
         val tipPrefix = if (forceDelaySec != null) "风控重试" else "自动领取任务"
@@ -345,7 +340,11 @@ class TaskService : android.app.Service() {
             while (remainingMs > 0L) {
                 if (!isAutoRunning) return@launch
                 if (isUploading) { delay(1000); continue }
-                val displaySec = ((remainingMs + 999L) / 1000L).toInt()
+                val displaySec = if (remainingMs < 1000L) {
+                    String.format(Locale.US, "%.1f", remainingMs / 1000.0)
+                } else {
+                    ((remainingMs + 999L) / 1000L).toString()
+                }
                 updateFloatStatus("$tipPrefix，${displaySec}s后执行...")
                 val stepMs = remainingMs.coerceAtMost(1000L)
                 delay(stepMs)
@@ -374,8 +373,8 @@ class TaskService : android.app.Service() {
         serviceScope.launch {
             try {
                 val taskResponse = ApiService.takeTask()
-                if (!taskResponse.isSuccess || taskResponse.data == null) {
-                    val msg = taskResponse.msg ?: "获取任务失败"
+                if (!taskResponse.isSuccess || taskResponse.task == null) {
+                    val msg = taskResponse.message
                     updateFloatStatus("领取任务失败：$msg")
                     if (msg.contains("登录") || msg.contains("token") || msg.contains("expired")) {
                         autoReLogin()
@@ -383,8 +382,9 @@ class TaskService : android.app.Service() {
                     return@launch
                 }
 
-                val task = taskResponse.data
-                currentTaskId = task.taskId
+                val task = taskResponse.task
+                currentTask = task
+                currentTaskId = task.id()
                 currentShopId = task.parseShopId()
                 currentItemId = task.parseItemId()
                 pendingFileContent = null
@@ -482,7 +482,7 @@ class TaskService : android.app.Service() {
     }
 
     private suspend fun waitForFileContent(): Boolean {
-        val timeout = 90_000L
+        val timeout = 20_000L
         val start = System.currentTimeMillis()
         while (System.currentTimeMillis() - start < timeout) {
             if (pendingFileContent != null) {
@@ -499,8 +499,8 @@ class TaskService : android.app.Service() {
             consecutiveTimeouts = 0
             return false
         }
-        updateFloatStatus("数据回传超时(${timeout/1000}s)\n连续超时${consecutiveTimeouts}次，10秒后重试")
-        if (isAutoRunning) startNextTaskCycle(forceDelaySec = 10)
+        updateFloatStatus("数据回传超时(${timeout/1000}s)\n连续超时${consecutiveTimeouts}次，3秒后重试")
+        if (isAutoRunning) startNextTaskCycle(forceDelaySec = 3)
         return false
     }
 
@@ -510,20 +510,27 @@ class TaskService : android.app.Service() {
                 stopAutoForDeviceBlock()
                 return
             }
-            val encryptedData = extractEncryptedData(fileContent)
+            val rawResponse = extractEncryptedData(fileContent)
+            val task = currentTask
+            if (task == null) {
+                failedCount++
+                updateFloatStatus("上传失败：任务信息缺失")
+                returnToChatIfNeeded("返回聊天页...")
+                return
+            }
 
             val pdpUrl = "https://shopee.tw/api/v4/pdp/get_pc?" +
                 "display_model_id=0&item_id=$currentItemId&model_selection_logic=3" +
                 "&shop_id=$currentShopId&tz_offset_in_minutes=480&detail_level=0"
 
             val response = ApiService.submitTask(
-                taskUrl = pdpUrl,
-                encryptedData = encryptedData,
-                username = TokenManager.getUsername(),
-                groupId = TokenManager.getGroupId(),
-                deviceId = getAppDeviceId()
+                taskId = currentTaskId,
+                taskPageUrl = task.pageUrl(),
+                submitUrl = pdpUrl,
+                rawResponse = rawResponse,
+                task = task
             )
-            if (response.isApi1Success) {
+            if (response.isSuccess) {
                 uploadCount++
                 sessionUploadCount++
                 Log.d(TAG, "Submit OK: task=$currentTaskId count=$uploadCount")
@@ -535,7 +542,7 @@ class TaskService : android.app.Service() {
                 }
             } else {
                 failedCount++
-                updateFloatStatus("上传失败: ${response.msg ?: "未知错误"}")
+                updateFloatStatus("上传失败: ${response.message}")
                 // 上传失败也要回聊天页，从聊天页继续下一个任务
                 returnToChatIfNeeded("返回聊天页...")
             }
@@ -546,6 +553,7 @@ class TaskService : android.app.Service() {
         } finally {
             isUploading = false
             currentTaskId = ""
+            currentTask = null
             broadcastStats()
             if (isAutoRunning && !triggerPauseRestIfNeeded()) startNextTaskCycle()
         }
@@ -612,12 +620,7 @@ class TaskService : android.app.Service() {
 
     private suspend fun sendHeartbeat() {
         try {
-            val response = ApiService.heartbeat(
-                username = TokenManager.getUsername(),
-                groupId = TokenManager.getGroupId(),
-                apiType = TokenManager.getApiType(),
-                deviceId = getAppDeviceId()
-            )
+            val response = ApiService.heartbeat()
             if (!response.ok || !response.allowed) {
                 deviceAllowed = false
                 deviceBlockedMsg = response.msg ?: "设备已被禁用"
@@ -637,11 +640,6 @@ class TaskService : android.app.Service() {
         pauseJob?.cancel()
         handler.post { tvAction?.text = "一键做任务"; tvAction?.setBackgroundResource(R.drawable.bg_float_action) }
         updateFloatStatus(deviceBlockedMsg)
-    }
-
-    private fun getAppDeviceId(): String {
-        val androidId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
-        return androidId?.takeIf { it.isNotBlank() } ?: "android-${Build.MODEL}"
     }
 
     private fun startUpdateCheck() {
@@ -691,12 +689,17 @@ class TaskService : android.app.Service() {
     private suspend fun autoReLogin() {
         updateFloatStatus("登录过期，正在重新登录...")
         try {
-            val username = TokenManager.getUsername()
-            val password = prefs.getString("saved_password", "") ?: ""
-            if (username.isNotEmpty() && password.isNotEmpty()) {
-                val resp = ApiService.login(username, password)
+            val accountId = TokenManager.getUsername()
+            val token = prefs.getString("saved_token", "") ?: ""
+            if (accountId.isNotEmpty() && token.isNotEmpty()) {
+                val resp = ApiService.login(accountId, token)
                 if (resp.isSuccess && resp.data != null) {
                     TokenManager.saveToken(resp.data.token)
+                    TokenManager.saveUsername(resp.data.accountId.ifBlank { accountId })
+                    TokenManager.saveGroupId(resp.data.groupId)
+                    TokenManager.saveAccountCount(
+                        if (resp.data.api1TaskAccountCount > 0) resp.data.api1TaskAccountCount else resp.data.taskAccountCount
+                    )
                     updateFloatStatus("重新登录成功")
                     if (isAutoRunning) startNextTaskCycle()
                     return

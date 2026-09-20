@@ -25,6 +25,7 @@ import com.app.helper.network.UpdateResponse
 import com.app.helper.service.ChatAccessibilityService
 import com.app.helper.service.TaskService
 import com.app.helper.ui.login.LoginActivity
+import com.app.helper.util.DelayPrefs
 import com.app.helper.util.FingerprintManager
 import com.app.helper.util.TokenManager
 import kotlinx.coroutines.CoroutineScope
@@ -64,16 +65,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupUI() {
-        binding.tvUsername.text = "账号：${TokenManager.getUsername()}"
+        val accountCount = TokenManager.getAccountCount()
+        binding.tvUsername.text = if (accountCount > 0) {
+            "下发ID：${TokenManager.getUsername()}（任务账号 $accountCount 个）"
+        } else {
+            "下发ID：${TokenManager.getUsername()}"
+        }
 
         binding.btnTestApi.setOnClickListener {
             showDelayConfigDialog()
         }
 
-        binding.btnDelay01.setOnClickListener { applyDelayPreset(0, 1) }
-        binding.btnDelay38.setOnClickListener { applyDelayPreset(3, 8) }
-        binding.btnDelay515.setOnClickListener { applyDelayPreset(5, 15) }
-        binding.btnDelay3060.setOnClickListener { applyDelayPreset(30, 60) }
+        binding.btnDelay01s.setOnClickListener { applyDelayPreset(100L, 100L) }
+        binding.btnDelay01.setOnClickListener { applyDelayPreset(0L, 1000L) }
+        binding.btnDelay38.setOnClickListener { applyDelayPreset(3000L, 8000L) }
+        binding.btnDelay515.setOnClickListener { applyDelayPreset(5000L, 15000L) }
+        binding.btnDelay3060.setOnClickListener { applyDelayPreset(30000L, 60000L) }
         refreshDelayUI()
         setupPauseConfig()
         setupChatMode()
@@ -334,26 +341,24 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun applyDelayPreset(min: Int, max: Int) {
-        val prefs = getSharedPreferences("task_config", MODE_PRIVATE)
-        prefs.edit().putInt("delay_min", min).putInt("delay_max", max).apply()
+    private fun applyDelayPreset(minMs: Long, maxMs: Long) {
+        DelayPrefs.set(this, minMs, maxMs)
         if (TaskService.isRunning) {
             val intent = Intent(this, TaskService::class.java).apply {
                 action = "SET_DELAY"
-                putExtra("delay_min", min)
-                putExtra("delay_max", max)
+                putExtra("delay_min_ms", minMs)
+                putExtra("delay_max_ms", maxMs)
             }
             startService(intent)
         }
         refreshDelayUI()
-        Toast.makeText(this, "延时已设置：$min-$max 秒", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "延时已设置：${DelayPrefs.formatMs(minMs)}-${DelayPrefs.formatMs(maxMs)}", Toast.LENGTH_SHORT).show()
     }
 
     private fun refreshDelayUI() {
-        val prefs = getSharedPreferences("task_config", MODE_PRIVATE)
-        val min = prefs.getInt("delay_min", 15)
-        val max = prefs.getInt("delay_max", 35)
-        binding.tvCurrentDelay.text = "当前：$min-$max 秒"
+        val minMs = DelayPrefs.getMinMs(this)
+        val maxMs = DelayPrefs.getMaxMs(this)
+        binding.tvCurrentDelay.text = "当前：${DelayPrefs.formatMs(minMs)}-${DelayPrefs.formatMs(maxMs)}"
 
         val active = android.content.res.ColorStateList.valueOf(0xFF1976D2.toInt())
         val activeText = 0xFFFFFFFF.toInt()
@@ -364,10 +369,11 @@ class MainActivity : AppCompatActivity() {
             btn.backgroundTintList = if (isActive) active else normal
             btn.setTextColor(if (isActive) activeText else normalText)
         }
-        apply(binding.btnDelay01, min == 0 && max == 1)
-        apply(binding.btnDelay38, min == 3 && max == 8)
-        apply(binding.btnDelay515, min == 5 && max == 15)
-        apply(binding.btnDelay3060, min == 30 && max == 60)
+        apply(binding.btnDelay01s, minMs == 100L && maxMs == 100L)
+        apply(binding.btnDelay01, minMs == 0L && maxMs == 1000L)
+        apply(binding.btnDelay38, minMs == 3000L && maxMs == 8000L)
+        apply(binding.btnDelay515, minMs == 5000L && maxMs == 15000L)
+        apply(binding.btnDelay3060, minMs == 30000L && maxMs == 60000L)
     }
 
     private fun setupPauseConfig() {
@@ -626,9 +632,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showDelayConfigDialog() {
-        val prefs = getSharedPreferences("task_config", MODE_PRIVATE)
-        val curMin = prefs.getInt("delay_min", 15)
-        val curMax = prefs.getInt("delay_max", 35)
+        val curMin = DelayPrefs.getMinMs(this) / 1000L
+        val curMax = DelayPrefs.getMaxMs(this) / 1000L
 
         val view = layoutInflater.inflate(R.layout.dialog_delay, null)
         val etMin = view.findViewById<android.widget.EditText>(R.id.et_delay_min)
@@ -642,16 +647,15 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("确定") { _, _ ->
                 val min = etMin.text.toString().toIntOrNull() ?: 3
                 val max = etMax.text.toString().toIntOrNull() ?: 8
-                prefs.edit()
-                    .putInt("delay_min", min.coerceAtLeast(1))
-                    .putInt("delay_max", max.coerceAtLeast(min))
-                    .apply()
-                Toast.makeText(this, "延迟已设置：$min-$max 秒", Toast.LENGTH_SHORT).show()
+                val minSec = min.coerceAtLeast(0)
+                val maxSec = max.coerceAtLeast(minSec)
+                DelayPrefs.set(this, minSec * 1000L, maxSec * 1000L)
+                Toast.makeText(this, "延迟已设置：${DelayPrefs.formatMs(minSec * 1000L)}-${DelayPrefs.formatMs(maxSec * 1000L)}", Toast.LENGTH_SHORT).show()
                 if (TaskService.isRunning) {
                     val intent = Intent(this, TaskService::class.java).apply {
                         action = "SET_DELAY"
-                        putExtra("delay_min", min)
-                        putExtra("delay_max", max)
+                        putExtra("delay_min_ms", minSec * 1000L)
+                        putExtra("delay_max_ms", maxSec * 1000L)
                     }
                     startService(intent)
                 }

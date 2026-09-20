@@ -37,12 +37,12 @@ object ApiService {
             .build()
     }
 
-    suspend fun login(username: String, password: String): ApiResponse<LoginData> {
-        return proxyPost(mapOf("act" to "api1_login", "username" to username, "password" to password))
+    suspend fun login(accountId: String, token: String): ApiResponse<LoginData> {
+        return proxyPost(mapOf("act" to "api1_login", "username" to accountId, "token" to token))
     }
 
-    suspend fun takeTask(): ApiResponse<TaskData> {
-        return get(ApiConfig.TASK_TAKE_PATH)
+    suspend fun takeTask(): ExtTakeResponse {
+        return ajiePost("task", ajieBody(), ExtTakeResponse::class.java)
     }
 
     suspend fun checkUpdate(versionCode: Int): UpdateResponse = withContext(Dispatchers.IO) {
@@ -59,60 +59,36 @@ object ApiService {
         gson.fromJson(json, UpdateResponse::class.java)
     }
 
-    suspend fun heartbeat(
-        username: String,
-        groupId: String,
-        apiType: Int,
-        deviceId: String
-    ): HeartbeatResponse = withContext(Dispatchers.IO) {
-        val body = HashMap<String, Any>()
-        body["act"] = "heartbeat"
-        body["username"] = username
-        body["group_id"] = groupId
-        body["api_type"] = apiType
-        body["device_id"] = deviceId
-        addFingerprintFields(body)
-
-        val jsonBody = gson.toJson(body)
-            .toRequestBody("application/json; charset=utf-8".toMediaType())
-
-        val request = Request.Builder()
-            .url(ApiConfig.DECRYPT_PROXY_URL)
-            .post(jsonBody)
-            .build()
-
-        val response = proxyClient.newCall(request).execute()
-        val json = response.body?.string() ?: throw Exception("Empty response")
-        gson.fromJson(json, HeartbeatResponse::class.java)
+    suspend fun heartbeat(): HeartbeatResponse {
+        val resp: HeartbeatExtResponse = ajiePost("heartbeat", ajieBody(), HeartbeatExtResponse::class.java)
+        return HeartbeatResponse(
+            ok = resp.success,
+            allowed = resp.data?.allowed ?: true,
+            msg = resp.msg ?: resp.error ?: "",
+            deviceKey = resp.data?.deviceKey ?: ""
+        )
     }
 
     suspend fun submitTask(
-        taskUrl: String,
-        encryptedData: String,
-        username: String,
-        groupId: String,
-        deviceId: String
-    ): Api2UpResponse = withContext(Dispatchers.IO) {
-        val body = HashMap<String, Any>()
-        body["api_type"] = 1
-        body["url"] = taskUrl
-        body["data"] = encryptedData
-        body["username"] = username
-        body["group_id"] = groupId
-        body["device_id"] = deviceId
-        body["auth_token"] = TokenManager.getToken()
-
-        val jsonBody = gson.toJson(body)
-            .toRequestBody("application/json; charset=utf-8".toMediaType())
-
-        val request = Request.Builder()
-            .url(ApiConfig.DECRYPT_PROXY_URL)
-            .post(jsonBody)
-            .build()
-
-        val response = proxyClient.newCall(request).execute()
-        val json = response.body?.string() ?: throw Exception("Empty response")
-        gson.fromJson(json, Api2UpResponse::class.java)
+        taskId: String,
+        taskPageUrl: String,
+        submitUrl: String,
+        rawResponse: String,
+        task: ExtTask
+    ): ExtSubmitResponse {
+        val body = ajieBody().apply {
+            put("deal_id", taskId)
+            put("productUrl", taskPageUrl)
+            put("url", submitUrl)
+            put("data", rawResponse)
+            put("success", true)
+            put("api1_take_token", task.takeToken())
+            put("task_account_key", task.accountKey())
+            put("task_account_username", task.accountUsername())
+            put("task_api_type", task.apiType())
+            put("task_runtime_scope", task.runtimeScope())
+        }
+        return ajiePost("submit", body, ExtSubmitResponse::class.java)
     }
 
     suspend fun reportFingerprintEvent(event: String, fpName: String, fpJson: String) = withContext(Dispatchers.IO) {
@@ -173,16 +149,35 @@ object ApiService {
         return bos.toByteArray()
     }
 
-    private suspend inline fun <reified T> get(path: String): ApiResponse<T> = withContext(Dispatchers.IO) {
+    private fun deviceId(): String {
+        val androidId = android.provider.Settings.Secure.getString(
+            App.context.contentResolver, android.provider.Settings.Secure.ANDROID_ID)
+        return androidId?.takeIf { it.isNotBlank() } ?: "android-${android.os.Build.MODEL}"
+    }
+
+    private fun ajieBody(): HashMap<String, Any> = hashMapOf(
+        "accountId" to TokenManager.getUsername(),
+        "token" to TokenManager.getToken(),
+        "client" to "ajie-extension",
+        "source" to "ajie",
+        "platform" to "android",
+        "device_type" to "android",
+        "device_label" to "安卓设备",
+        "device_id" to deviceId()
+    )
+
+    private suspend inline fun <reified T> ajiePost(path: String, body: Map<String, Any>): T = withContext(Dispatchers.IO) {
+        val jsonBody = gson.toJson(body)
+            .toRequestBody("application/json; charset=utf-8".toMediaType())
+
         val request = Request.Builder()
-            .url(ApiConfig.BASE_URL + path)
-            .get()
+            .url(ApiConfig.DECRYPT_PROXY_URL + "?ajie_api=" + path)
+            .post(jsonBody)
             .build()
 
-        val response = HttpClient.client.newCall(request).execute()
+        val response = proxyClient.newCall(request).execute()
         val json = response.body?.string() ?: throw Exception("Empty response")
-        val type = TypeToken.getParameterized(ApiResponse::class.java, T::class.java).type
-        gson.fromJson(json, type)
+        gson.fromJson(json, T::class.java)
     }
 
     private suspend inline fun <reified T> proxyPost(body: Any): ApiResponse<T> = withContext(Dispatchers.IO) {

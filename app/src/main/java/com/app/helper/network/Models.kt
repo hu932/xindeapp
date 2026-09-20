@@ -14,7 +14,10 @@ data class ApiResponse<T>(
 data class LoginData(
     @SerializedName("token") val token: String = "",
     @SerializedName("userLevel") val userLevel: Int = 0,
-    @SerializedName("groupId") val groupId: String = ""
+    @SerializedName("groupId") val groupId: String = "",
+    @SerializedName("accountId") val accountId: String = "",
+    @SerializedName("task_account_count") val taskAccountCount: Int = 0,
+    @SerializedName("api1_task_account_count") val api1TaskAccountCount: Int = 0
 )
 
 data class TaskData(
@@ -120,4 +123,68 @@ data class UpdateResponse(
     @SerializedName("force") val force: Boolean = false,
     @SerializedName("blocked") val blocked: Boolean = false,
     @SerializedName("blocked_msg") val blockedMsg: String = ""
+)
+
+data class ExtTask(
+    @SerializedName("taskId") val taskId: String = "",
+    @SerializedName("deal_id") val dealId: String = "",
+    @SerializedName("url") val url: String = "",
+    @SerializedName("taskUrl") val taskUrl: String = "",
+    @SerializedName("api1TakeToken") val api1TakeToken: String = "",
+    @SerializedName("api1_take_token") val api1TakeTokenSnake: String = "",
+    @SerializedName("taskAccountKey") val taskAccountKey: String = "",
+    @SerializedName("task_account_key") val taskAccountKeySnake: String = "",
+    @SerializedName("taskAccountUsername") val taskAccountUsername: String = "",
+    @SerializedName("task_account_username") val taskAccountUsernameSnake: String = "",
+    @SerializedName("taskApiType") val taskApiType: Int = 0,
+    @SerializedName("task_api_type") val taskApiTypeSnake: Int = 0,
+    @SerializedName("taskRuntimeScope") val taskRuntimeScope: String = "",
+    @SerializedName("task_runtime_scope") val taskRuntimeScopeSnake: String = ""
+) {
+    fun id(): String = taskId.ifBlank { dealId }
+    fun pageUrl(): String = url.ifBlank { taskUrl }
+    fun takeToken(): String = api1TakeToken.ifBlank { api1TakeTokenSnake }
+    fun accountKey(): String = taskAccountKey.ifBlank { taskAccountKeySnake }
+    fun accountUsername(): String = taskAccountUsername.ifBlank { taskAccountUsernameSnake }
+    fun apiType(): Int = if (taskApiType in 1..2) taskApiType else taskApiTypeSnake
+    fun runtimeScope(): String = taskRuntimeScope.ifBlank { taskRuntimeScopeSnake }
+    fun parseShopId(): Long {
+        val parts = pageUrl().trimEnd('/').split("/")
+        return if (parts.size >= 2) parts[parts.size - 2].toLongOrNull() ?: 0L else 0L
+    }
+    fun parseItemId(): Long = pageUrl().trimEnd('/').split("/").lastOrNull()?.toLongOrNull() ?: 0L
+}
+
+data class ExtTakeResponse(
+    @SerializedName("success") val success: Boolean = false,
+    @SerializedName("msg") val msg: String? = null,
+    @SerializedName("error") val error: String? = null,
+    @SerializedName("task") val task: ExtTask? = null
+) {
+    val isSuccess: Boolean get() = success && task != null
+    val message: String get() = error ?: msg ?: "获取任务失败"
+}
+
+data class ExtSubmitResponse(
+    @SerializedName("success") val success: Boolean = false,
+    @SerializedName("ok") val ok: Boolean = false,
+    @SerializedName("code") val code: String = "",
+    @SerializedName("status") val status: String = "",
+    @SerializedName("msg") val msg: String? = null,
+    @SerializedName("error") val error: String? = null
+) {
+    val isSuccess: Boolean get() = success || ok || code == "200" || status == "success"
+    val message: String get() = error ?: msg ?: "提交失败"
+}
+
+data class HeartbeatExtData(
+    @SerializedName("allowed") val allowed: Boolean = true,
+    @SerializedName("device_key") val deviceKey: String = ""
+)
+
+data class HeartbeatExtResponse(
+    @SerializedName("success") val success: Boolean = false,
+    @SerializedName("msg") val msg: String? = null,
+    @SerializedName("error") val error: String? = null,
+    @SerializedName("data") val data: HeartbeatExtData? = null
 )

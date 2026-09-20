@@ -11,6 +11,7 @@ object TokenManager {
     private const val KEY_USER_LEVEL = "user_level"
     private const val KEY_API_TYPE = "api_type"
     private const val KEY_GROUP_ID = "group_id"
+    private const val KEY_ACCOUNT_COUNT = "account_count"
 
     const val API_TYPE_1 = 1
 
@@ -31,6 +32,9 @@ object TokenManager {
 
     fun saveGroupId(groupId: String) { prefs.edit().putString(KEY_GROUP_ID, groupId).apply() }
     fun getGroupId(): String = prefs.getString(KEY_GROUP_ID, "") ?: ""
+
+    fun saveAccountCount(count: Int) { prefs.edit().putInt(KEY_ACCOUNT_COUNT, count).apply() }
+    fun getAccountCount(): Int = prefs.getInt(KEY_ACCOUNT_COUNT, 0)
 
     fun isLoggedIn(): Boolean = getToken().isNotEmpty()
 

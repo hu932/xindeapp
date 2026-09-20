@@ -27,32 +27,35 @@ class LoginActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         binding.btnLogin.setOnClickListener {
-            val username = binding.etUsername.text.toString().trim()
-            val password = binding.etPassword.text.toString().trim()
+            val accountId = binding.etUsername.text.toString().trim()
+            val token = binding.etPassword.text.toString().trim()
 
-            if (username.isEmpty() || password.isEmpty()) {
-                Toast.makeText(this, "请输入账号和密码", Toast.LENGTH_SHORT).show()
+            if (accountId.isEmpty() || token.isEmpty()) {
+                Toast.makeText(this, "请输入下发ID和Token", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
-            performLogin(username, password)
+            performLogin(accountId, token)
         }
     }
 
-    private fun performLogin(username: String, password: String) {
+    private fun performLogin(accountId: String, token: String) {
         binding.btnLogin.isEnabled = false
         binding.btnLogin.text = "登录中..."
 
         lifecycleScope.launch {
             try {
-                val response = ApiService.login(username, password)
+                val response = ApiService.login(accountId, token)
                 if (response.isSuccess && response.data != null) {
                     TokenManager.saveToken(response.data.token)
-                    TokenManager.saveUsername(username)
-                    TokenManager.saveUserLevel(response.data.userLevel)
+                    TokenManager.saveUsername(response.data.accountId.ifBlank { accountId })
+                    TokenManager.saveGroupId(response.data.groupId)
                     TokenManager.saveApiType(TokenManager.API_TYPE_1)
+                    TokenManager.saveAccountCount(
+                        if (response.data.api1TaskAccountCount > 0) response.data.api1TaskAccountCount else response.data.taskAccountCount
+                    )
                     getSharedPreferences("task_config", MODE_PRIVATE)
-                        .edit().putString("saved_password", password).apply()
+                        .edit().putString("saved_token", token).apply()
                     Toast.makeText(this@LoginActivity, "登录成功", Toast.LENGTH_SHORT).show()
                     startMain()
                     return@launch
