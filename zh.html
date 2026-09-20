@@ -219,9 +219,17 @@ function doParse(){
   const old=new Map(cur().map(r=>[keyOf(r),r]));
   accounts.forEach(a=>{
     const o=old.get(keyOf(a));
-    if(o){a.usedAt=o.usedAt;a.updatedAt=o.updatedAt||Date.now();}
+    if(o)a.usedAt=o.usedAt;   // 保留使用计时
+    a.updatedAt=Date.now();   // 重新粘贴视为最新
   });
-  if(tab==='local')data.local=accounts; else data.shared=accounts;
+  if(tab==='local'){
+    data.local=accounts;
+  } else {
+    // 共享：合并进现有列表，避免整表替换把别的账号挤掉
+    const map=new Map(data.shared.map(r=>[keyOf(r),r]));
+    accounts.forEach(a=>{map.set(keyOf(a),a);});
+    data.shared=[...map.values()];
+  }
   render();saveAll();
   if(tab==='shared')pushSoon();
   setStatus(accounts.length?`已识别 ${accounts.length} 个账号${skip?'，跳过 '+skip+' 段无效':''}`:skip?'未识别到有效账号':'未识别到账号',accounts.length?'ok':'err');
@@ -259,16 +267,12 @@ function api(body,timeoutMs){
 }
 function sig(){return data.shared.map(r=>keyOf(r)+':'+(r.updatedAt||0)+':'+(r.usedAt||0)).sort().join('|');}
 function adoptShared(list){
-  const map=new Map(data.shared.map(r=>[keyOf(r),r]));
-  (list||[]).forEach(s=>{
-    if(!s||!Array.isArray(s.cookies)||!s.cookies.length)return;
-    const k=keyOf(s),local=map.get(k);
-    const inc={id:s.id||rid(),uid:s.uid||'',cookies:s.cookies,ua:s.ua||'',region:s.region||'',
-      usedAt:s.usedAt||null,updatedAt:s.updatedAt||0};
-    if(!local)map.set(k,inc);
-    else if((inc.updatedAt||0)>(local.updatedAt||0))Object.assign(local,inc);
-  });
-  data.shared=[...map.values()];
+  // 服务器是共享数据的唯一权威：直接整体替换本地共享列表，
+  // 才能把“别人删除/清空”的账号也同步删掉，避免多端不一致。
+  data.shared=(Array.isArray(list)?list:[]).filter(s=>s&&Array.isArray(s.cookies)&&s.cookies.length).map(s=>({
+    id:s.id||rid(),uid:s.uid||'',cookies:s.cookies,ua:s.ua||'',region:s.region||'',
+    usedAt:s.usedAt||null,updatedAt:s.updatedAt||0
+  }));
 }
 function fail(e){return (e&&e.name==='AbortError')?'超时':((e&&e.message)||String(e));}
 async function pull(quiet){
@@ -369,7 +373,7 @@ $('shareStatus').addEventListener('click',async ()=>{
 restore();
 render();
 setShare('syncing','同步中…');
-pull(true).then(()=>push());
+push().then(()=>pull(true));   // 先推本地改动，再拉服务器权威列表
 setInterval(()=>pull(true),15000);   // 每 15 秒拉一次，别人改的也能看到
 })();
 </script>
