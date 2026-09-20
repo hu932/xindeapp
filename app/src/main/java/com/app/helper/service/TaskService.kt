@@ -690,9 +690,8 @@ class TaskService : android.app.Service() {
         updateFloatStatus("登录过期，正在重新登录...")
         try {
             val accountId = TokenManager.getUsername()
-            val token = prefs.getString("saved_token", "") ?: ""
-            if (accountId.isNotEmpty() && token.isNotEmpty()) {
-                val resp = ApiService.login(accountId, token)
+            if (accountId.isNotEmpty()) {
+                val resp = ApiService.login(accountId)
                 if (resp.isSuccess && resp.data != null) {
                     TokenManager.saveToken(resp.data.token)
                     TokenManager.saveUsername(resp.data.accountId.ifBlank { accountId })

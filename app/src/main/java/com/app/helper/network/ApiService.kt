@@ -37,8 +37,8 @@ object ApiService {
             .build()
     }
 
-    suspend fun login(accountId: String, token: String): ApiResponse<LoginData> {
-        return proxyPost(mapOf("act" to "api1_login", "username" to accountId, "token" to token))
+    suspend fun login(accountId: String): ApiResponse<LoginData> {
+        return proxyPost(mapOf("act" to "api1_login", "username" to accountId))
     }
 
     suspend fun takeTask(): ExtTakeResponse {

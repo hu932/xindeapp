@@ -8791,6 +8791,9 @@ if ($postAct === 'api1_login') {
     if ($pluginAccount) {
         jsonResp(decodedExtensionLoginResponseForAccount($pluginAccount));
     }
+    if ($password === '' && $username !== '') {
+        jsonResp(['code' => '403', 'data' => null, 'msg' => '下发ID不存在或未启用']);
+    }
     if ($username === '' || $password === '') {
         jsonResp(['code' => '400', 'data' => null, 'msg' => '账号或密码为空']);
     }

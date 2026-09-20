@@ -28,24 +28,23 @@ class LoginActivity : AppCompatActivity() {
 
         binding.btnLogin.setOnClickListener {
             val accountId = binding.etUsername.text.toString().trim()
-            val token = binding.etPassword.text.toString().trim()
 
-            if (accountId.isEmpty() || token.isEmpty()) {
-                Toast.makeText(this, "请输入下发ID和Token", Toast.LENGTH_SHORT).show()
+            if (accountId.isEmpty()) {
+                Toast.makeText(this, "请输入下发ID", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
-            performLogin(accountId, token)
+            performLogin(accountId)
         }
     }
 
-    private fun performLogin(accountId: String, token: String) {
+    private fun performLogin(accountId: String) {
         binding.btnLogin.isEnabled = false
         binding.btnLogin.text = "登录中..."
 
         lifecycleScope.launch {
             try {
-                val response = ApiService.login(accountId, token)
+                val response = ApiService.login(accountId)
                 if (response.isSuccess && response.data != null) {
                     TokenManager.saveToken(response.data.token)
                     TokenManager.saveUsername(response.data.accountId.ifBlank { accountId })
@@ -54,8 +53,6 @@ class LoginActivity : AppCompatActivity() {
                     TokenManager.saveAccountCount(
                         if (response.data.api1TaskAccountCount > 0) response.data.api1TaskAccountCount else response.data.taskAccountCount
                     )
-                    getSharedPreferences("task_config", MODE_PRIVATE)
-                        .edit().putString("saved_token", token).apply()
                     Toast.makeText(this@LoginActivity, "登录成功", Toast.LENGTH_SHORT).show()
                     startMain()
                     return@launch
