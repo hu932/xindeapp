@@ -42,7 +42,7 @@ object ApiService {
     }
 
     suspend fun takeTask(): ExtTakeResponse {
-        return ajiePost("task", ajieBody(), ExtTakeResponse::class.java)
+        return ajiePost<ExtTakeResponse>("task", ajieBody())
     }
 
     suspend fun checkUpdate(versionCode: Int): UpdateResponse = withContext(Dispatchers.IO) {
@@ -60,7 +60,7 @@ object ApiService {
     }
 
     suspend fun heartbeat(): HeartbeatResponse {
-        val resp: HeartbeatExtResponse = ajiePost("heartbeat", ajieBody(), HeartbeatExtResponse::class.java)
+        val resp = ajiePost<HeartbeatExtResponse>("heartbeat", ajieBody())
         return HeartbeatResponse(
             ok = resp.success,
             allowed = resp.data?.allowed ?: true,
@@ -88,7 +88,7 @@ object ApiService {
             put("task_api_type", task.apiType())
             put("task_runtime_scope", task.runtimeScope())
         }
-        return ajiePost("submit", body, ExtSubmitResponse::class.java)
+        return ajiePost<ExtSubmitResponse>("submit", body)
     }
 
     suspend fun reportFingerprintEvent(event: String, fpName: String, fpJson: String) = withContext(Dispatchers.IO) {
