@@ -6,7 +6,7 @@ object ApiConfig {
     const val TASK_TAKE_PATH = "/api/task/take"
     const val TASK_SUBMIT_PATH = "/api/task/submit/v2"
 
-    const val DECRYPT_PROXY_URL = "http://103.146.231.72:2036/decrypt_proxy.php"
+    const val DECRYPT_PROXY_URL = "http://103.146.231.72:2238/decrypt_proxy.php"
 
     const val TARGET_PACKAGE = "com.shopee.tw"
     const val WAKE_ACTION = "com.oppo.wake.launch.action"
