@@ -65,7 +65,9 @@ object ApiService {
             ok = resp.success,
             allowed = resp.data?.allowed ?: true,
             msg = resp.msg ?: resp.error ?: "",
-            deviceKey = resp.data?.deviceKey ?: ""
+            deviceKey = resp.data?.deviceKey ?: "",
+            riskControl = resp.data?.riskControl ?: false,
+            riskMsg = resp.data?.riskMsg ?: ""
         )
     }
 
@@ -110,6 +112,24 @@ object ApiService {
             .build()
 
         proxyClient.newCall(request).execute().close()
+    }
+
+    suspend fun reportDeviceRisk(reason: String) = withContext(Dispatchers.IO) {
+        try {
+            val body = HashMap<String, Any>()
+            body["act"] = "device_risk"
+            body["username"] = TokenManager.getUsername()
+            body["device_id"] = deviceId()
+            body["reason"] = reason
+            val jsonBody = gson.toJson(body)
+                .toRequestBody("application/json; charset=utf-8".toMediaType())
+            val request = Request.Builder()
+                .url(ApiConfig.DECRYPT_PROXY_URL)
+                .post(jsonBody)
+                .build()
+            proxyClient.newCall(request).execute().close()
+        } catch (_: Exception) {
+        }
     }
 
     private fun addFingerprintFields(body: MutableMap<String, Any>) {
@@ -162,7 +182,7 @@ object ApiService {
         "source" to "ajie",
         "platform" to "android",
         "device_type" to "android",
-        "device_label" to "安卓设备",
+        "device_label" to (TokenManager.getDeviceName().ifBlank { "安卓设备" }),
         "device_id" to deviceId()
     )
 

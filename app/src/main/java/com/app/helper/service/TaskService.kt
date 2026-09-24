@@ -77,6 +77,7 @@ class TaskService : android.app.Service() {
     @Volatile private var versionBlocked = false
     @Volatile private var versionBlockedMsg = "版本已停用，请更新"
     private var consecutiveTimeouts = 0
+    @Volatile private var riskReported = false
 
     private var touchDownX = 0f
     private var touchDownY = 0f
@@ -374,11 +375,17 @@ class TaskService : android.app.Service() {
             try {
                 val taskResponse = ApiService.takeTask()
                 if (!taskResponse.isSuccess || taskResponse.task == null) {
-                    val msg = taskResponse.message
+                    val rawMsg = taskResponse.message
+                    val msg = if (rawMsg.contains("fetchcool", ignoreCase = true)
+                        || rawMsg.contains("cooldown", ignoreCase = true)) "暂无任务" else rawMsg
                     updateFloatStatus("领取任务失败：$msg")
                     if (msg.contains("登录") || msg.contains("token") || msg.contains("expired")) {
                         autoReLogin()
-                    } else if (isAutoRunning) { startNextTaskCycle() }
+                    } else if (isAutoRunning) {
+                        val retrySeconds = taskResponse.retryAfterSeconds.coerceIn(0, 300)
+                        if (retrySeconds > 0) startNextTaskCycle(forceDelaySec = retrySeconds)
+                        else startNextTaskCycle()
+                    }
                     return@launch
                 }
 
@@ -495,7 +502,13 @@ class TaskService : android.app.Service() {
         if (consecutiveTimeouts >= 2) {
             isAutoRunning = false
             handler.post { tvAction?.text = "一键做任务"; tvAction?.setBackgroundResource(R.drawable.bg_float_action) }
-            updateFloatStatus("疑似风控！连续${consecutiveTimeouts}次超时\n已自动暂停，请检查环境")
+            if (!riskReported) {
+                riskReported = true
+                serviceScope.launch {
+                    try { ApiService.reportDeviceRisk("连续多次回传超时，疑似风控") } catch (_: Exception) {}
+                }
+            }
+            updateFloatStatus("该设备已触发风控，请及时更换账号\n（连续${consecutiveTimeouts}次超时，已自动暂停）")
             consecutiveTimeouts = 0
             return false
         }
@@ -627,6 +640,14 @@ class TaskService : android.app.Service() {
                 stopAutoForDeviceBlock()
             } else {
                 deviceAllowed = true
+                if (response.riskControl) {
+                    if (!riskReported) {
+                        riskReported = true
+                        updateFloatStatus(response.riskMsg.ifBlank { "该设备已触发风控，请及时更换账号" })
+                    }
+                } else {
+                    riskReported = false
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Heartbeat failed", e)

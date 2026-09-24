@@ -12,17 +12,31 @@
         android:layout_height="wrap_content"
         android:text="Ajie"
         android:textColor="#FFFFFF"
-        android:textSize="30sp"
+        android:textSize="36sp"
         android:textStyle="bold" />
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:layout_marginBottom="28dp"
-        android:text="下发ID登录"
+        android:layout_marginTop="12dp"
+        android:background="@drawable/bg_go_badge"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:paddingTop="5dp"
+        android:paddingBottom="5dp"
+        android:text="GO 高性能版"
+        android:textColor="#FFFFFF"
+        android:textSize="12sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:layout_marginBottom="32dp"
+        android:text="任务下发 · 服务器主动拉取分配"
         android:textColor="#B9C8FF"
-        android:textSize="14sp" />
+        android:textSize="13sp" />
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -30,6 +44,15 @@
         android:background="@drawable/bg_login_card"
         android:orientation="vertical"
         android:padding="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="20dp"
+            android:text="账号登录"
+            android:textColor="#1A2A6B"
+            android:textSize="18sp"
+            android:textStyle="bold" />
 
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent"
@@ -48,8 +71,18 @@
             android:id="@+id/btn_login"
             android:layout_width="match_parent"
             android:layout_height="50dp"
-            android:text="登录"
+            android:text="登 录"
             android:textSize="16sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center"
+            android:text="极速下发 · 回传低延迟"
+            android:textColor="#999999"
+            android:textSize="12sp" />
     </LinearLayout>
 
 </LinearLayout>
+

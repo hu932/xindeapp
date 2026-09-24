@@ -76,6 +76,17 @@ class MainActivity : AppCompatActivity() {
             showDelayConfigDialog()
         }
 
+        binding.etDeviceName.setText(TokenManager.getDeviceName())
+        binding.btnSaveDeviceName.setOnClickListener {
+            val name = binding.etDeviceName.text.toString().trim()
+            TokenManager.saveDeviceName(name)
+            Toast.makeText(
+                this,
+                "机器备注已保存：" + name.ifBlank { "默认（安卓设备）" },
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+
         binding.btnDelay01s.setOnClickListener { applyDelayPreset(100L, 100L) }
         binding.btnDelay01.setOnClickListener { applyDelayPreset(0L, 1000L) }
         binding.btnDelay38.setOnClickListener { applyDelayPreset(3000L, 8000L) }

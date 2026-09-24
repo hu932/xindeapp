@@ -12,6 +12,7 @@ object TokenManager {
     private const val KEY_API_TYPE = "api_type"
     private const val KEY_GROUP_ID = "group_id"
     private const val KEY_ACCOUNT_COUNT = "account_count"
+    private const val KEY_DEVICE_NAME = "device_name"
 
     const val API_TYPE_1 = 1
 
@@ -35,6 +36,9 @@ object TokenManager {
 
     fun saveAccountCount(count: Int) { prefs.edit().putInt(KEY_ACCOUNT_COUNT, count).apply() }
     fun getAccountCount(): Int = prefs.getInt(KEY_ACCOUNT_COUNT, 0)
+
+    fun saveDeviceName(name: String) { prefs.edit().putString(KEY_DEVICE_NAME, name).apply() }
+    fun getDeviceName(): String = prefs.getString(KEY_DEVICE_NAME, "") ?: ""
 
     fun isLoggedIn(): Boolean = getToken().isNotEmpty()
 

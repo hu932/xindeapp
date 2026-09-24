@@ -109,7 +109,9 @@ data class HeartbeatResponse(
     @SerializedName("ok") val ok: Boolean = false,
     @SerializedName("allowed") val allowed: Boolean = true,
     @SerializedName("msg") val msg: String? = null,
-    @SerializedName("device_key") val deviceKey: String = ""
+    @SerializedName("device_key") val deviceKey: String = "",
+    @SerializedName("risk_control") val riskControl: Boolean = false,
+    @SerializedName("risk_msg") val riskMsg: String = ""
 )
 
 data class UpdateResponse(
@@ -159,6 +161,7 @@ data class ExtTakeResponse(
     @SerializedName("success") val success: Boolean = false,
     @SerializedName("msg") val msg: String? = null,
     @SerializedName("error") val error: String? = null,
+    @SerializedName("retry_after_seconds") val retryAfterSeconds: Int = 0,
     @SerializedName("task") val task: ExtTask? = null
 ) {
     val isSuccess: Boolean get() = success && task != null
@@ -179,7 +182,9 @@ data class ExtSubmitResponse(
 
 data class HeartbeatExtData(
     @SerializedName("allowed") val allowed: Boolean = true,
-    @SerializedName("device_key") val deviceKey: String = ""
+    @SerializedName("device_key") val deviceKey: String = "",
+    @SerializedName("risk_control") val riskControl: Boolean = false,
+    @SerializedName("risk_msg") val riskMsg: String = ""
 )
 
 data class HeartbeatExtResponse(
