@@ -44,6 +44,8 @@ class MainActivity : AppCompatActivity() {
     private var logReceiver: android.content.BroadcastReceiver? = null
     private var updateReceiver: android.content.BroadcastReceiver? = null
     private var statsReceiver: android.content.BroadcastReceiver? = null
+    private var downloadReceiver: android.content.BroadcastReceiver? = null
+    private var pendingDownloadId = -1L
     private val activityScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val fpAdapter = FpAdapter()
 
@@ -57,6 +59,7 @@ class MainActivity : AppCompatActivity() {
         registerLogReceiver()
         registerUpdateReceiver()
         registerStatsReceiver()
+        registerDownloadReceiver()
         checkAppUpdate()
 
         if (checkOverlayPermission()) {
@@ -519,6 +522,7 @@ class MainActivity : AppCompatActivity() {
         logReceiver?.let { try { unregisterReceiver(it) } catch (_: Exception) {} }
         updateReceiver?.let { try { unregisterReceiver(it) } catch (_: Exception) {} }
         statsReceiver?.let { try { unregisterReceiver(it) } catch (_: Exception) {} }
+        downloadReceiver?.let { try { unregisterReceiver(it) } catch (_: Exception) {} }
     }
 
     private fun checkAppUpdate() {
@@ -596,26 +600,64 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
+    private fun registerDownloadReceiver() {
+        downloadReceiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
+                if (id > 0 && id == pendingDownloadId) {
+                    installApk(id)
+                }
+            }
+        }
+        val filter = android.content.IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(downloadReceiver, filter, RECEIVER_EXPORTED)
+        } else {
+            registerReceiver(downloadReceiver, filter)
+        }
+    }
+
     private fun downloadApk(apkUrl: String, versionName: String) {
         try {
             val fileName = "Ajie-${versionName.ifBlank { "更新" }}.apk"
             val request = DownloadManager.Request(Uri.parse(apkUrl))
                 .setTitle("Ajie 更新")
-                .setDescription("正在下载更新")
+                .setDescription("下载完成后自动弹出安装")
                 .setMimeType("application/vnd.android.package-archive")
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
                 .setAllowedOverMetered(true)
                 .setAllowedOverRoaming(true)
             val manager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            manager.enqueue(request)
-            Toast.makeText(this, "已开始下载", Toast.LENGTH_LONG).show()
+            pendingDownloadId = manager.enqueue(request)
+            Toast.makeText(this, "开始下载，完成后自动弹出安装", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             Toast.makeText(this, "下载失败：${e.message}", Toast.LENGTH_LONG).show()
             try {
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl)))
             } catch (_: Exception) {
             }
+        }
+    }
+
+    private fun installApk(downloadId: Long) {
+        try {
+            val manager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            val uri = manager.getUriForDownloadedFile(downloadId) ?: return
+            // Android 8+ 需允许「安装未知来源应用」
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+                Toast.makeText(this, "请允许安装未知来源应用后，再点通知栏里的下载完成项安装", Toast.LENGTH_LONG).show()
+                startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                return
+            }
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "安装失败：${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
