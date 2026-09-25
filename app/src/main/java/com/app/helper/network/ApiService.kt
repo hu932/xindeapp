@@ -63,15 +63,39 @@ object ApiService {
                 .build()
 
             val response = proxyClient.newCall(request).execute()
-            val json = response.body?.string() ?: throw Exception("Empty response")
-            val teamResp = gson.fromJson(json, TeamTakeResponse::class.java)
-            val t = teamResp.task
-            if (teamResp.success && t != null && t.data != null) {
-                ExtTakeResponse(success = true, task = mapTeamTask(t))
-            } else if (t == null || t.data == null) {
-                ExtTakeResponse(success = false, msg = "暂无任务")
+            val json = response.body?.string()?.trim().orEmpty()
+            if (json.isEmpty() || json == "null") {
+                return@withContext ExtTakeResponse(success = false, msg = "暂无任务")
+            }
+
+            // 手动解析，字段类型/缺失都容错，避免 Gson 因类型不匹配返回 null 导致 NPE
+            val obj = JSONObject(json)
+            val success = obj.optBoolean("success", false)
+            val taskObj = obj.optJSONObject("task")
+            val dataObj = taskObj?.optJSONObject("data")
+            if (success && dataObj != null) {
+                val shopId = dataObj.optString("shop_id", "")
+                val goodId = dataObj.optString("good_id", "")
+                val traceId = dataObj.optString("trace_id", "").ifBlank { dataObj.optString("id", "") }
+                val country = dataObj.optString("country", "")
+                val type = taskObj.optString("type", "").ifBlank { dataObj.optString("type", "") }
+                val taskUrl = "https://shopee.tw/product/$shopId/$goodId"
+                ExtTakeResponse(
+                    success = true,
+                    task = ExtTask(
+                        taskId = traceId,
+                        url = taskUrl,
+                        taskUrl = taskUrl,
+                        country = country,
+                        taskType = type,
+                        rawType = type,
+                        shopId = shopId,
+                        goodId = goodId,
+                        traceId = traceId
+                    )
+                )
             } else {
-                ExtTakeResponse(success = false, msg = "获取任务失败")
+                ExtTakeResponse(success = false, msg = "暂无任务")
             }
         } catch (e: Exception) {
             ExtTakeResponse(success = false, error = e.message ?: "网络错误")
@@ -147,10 +171,10 @@ object ApiService {
             val response = proxyClient.newCall(request).execute()
             val json = response.body?.string() ?: throw Exception("Empty response")
             val resp = gson.fromJson(json, TeamUploadResponse::class.java)
-            if (resp.success || resp.code == 200) {
+            if (resp != null && (resp.success || resp.code == 200)) {
                 ExtSubmitResponse(success = true, code = resp.code.toString())
             } else {
-                ExtSubmitResponse(success = false, error = resp.msg ?: "上传失败")
+                ExtSubmitResponse(success = false, error = resp?.msg ?: "上传失败")
             }
         } catch (e: Exception) {
             ExtSubmitResponse(success = false, error = e.message ?: "上传异常")
