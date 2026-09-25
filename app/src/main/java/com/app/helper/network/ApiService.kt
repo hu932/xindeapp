@@ -38,11 +38,44 @@ object ApiService {
     }
 
     suspend fun login(accountId: String): ApiResponse<LoginData> {
-        return proxyPost(mapOf("act" to "api1_login", "username" to accountId))
+        // 团队C：手机号直接登录，无需服务器验证
+        return ApiResponse(
+            code = "200",
+            data = LoginData(
+                token = "team-c-" + accountId,
+                accountId = accountId,
+                userLevel = 1,
+                groupId = "team-c",
+                taskAccountCount = 0,
+                api1TaskAccountCount = 0
+            )
+        )
     }
 
-    suspend fun takeTask(): ExtTakeResponse {
-        return ajiePost<ExtTakeResponse>("task", ajieBody())
+    suspend fun takeTask(): ExtTakeResponse = withContext(Dispatchers.IO) {
+        try {
+            val phone = TokenManager.getUsername()
+            val url = ApiConfig.TEAM_BASE_URL + ApiConfig.TEAM_TASK_TAKE_PATH +
+                "?phone=" + URLEncoder.encode(phone, "UTF-8")
+            val request = Request.Builder()
+                .url(url)
+                .get()
+                .build()
+
+            val response = proxyClient.newCall(request).execute()
+            val json = response.body?.string() ?: throw Exception("Empty response")
+            val teamResp = gson.fromJson(json, TeamTakeResponse::class.java)
+            val t = teamResp.task
+            if (teamResp.success && t != null && t.data != null) {
+                ExtTakeResponse(success = true, task = mapTeamTask(t))
+            } else if (t == null || t.data == null) {
+                ExtTakeResponse(success = false, msg = "暂无任务")
+            } else {
+                ExtTakeResponse(success = false, msg = "获取任务失败")
+            }
+        } catch (e: Exception) {
+            ExtTakeResponse(success = false, error = e.message ?: "网络错误")
+        }
     }
 
     suspend fun checkUpdate(versionCode: Int): UpdateResponse = withContext(Dispatchers.IO) {
@@ -77,20 +110,76 @@ object ApiService {
         submitUrl: String,
         rawResponse: String,
         task: ExtTask
-    ): ExtSubmitResponse {
-        val body = ajieBody().apply {
-            put("deal_id", taskId)
-            put("productUrl", taskPageUrl)
-            put("url", submitUrl)
-            put("data", rawResponse)
-            put("success", true)
-            put("api1_take_token", task.takeToken())
-            put("task_account_key", task.accountKey())
-            put("task_account_username", task.accountUsername())
-            put("task_api_type", task.apiType())
-            put("task_runtime_scope", task.runtimeScope())
+    ): ExtSubmitResponse = withContext(Dispatchers.IO) {
+        try {
+            // 1) 先解密：把加密数据发到后台解密接口，拿到商品 JSON
+            val decrypted = decryptSubmitData(rawResponse)
+            if (decrypted.isBlank()) {
+                return@withContext ExtSubmitResponse(success = false, error = "解密失败：未拿到商品数据")
+            }
+
+            // 2) 组装上传 body：content 为商品 JSON 转对象
+            val shopId = task.shopId.ifBlank { task.parseShopId().toString() }
+            val goodId = task.goodId.ifBlank { task.parseItemId().toString() }
+            val traceId = task.traceId.ifBlank { task.id() }
+            val country = task.country.ifBlank { "tw" }
+            val type = task.taskType.ifBlank { task.rawType.ifBlank { "pdp" } }
+
+            val body = JSONObject()
+            body.put("type", type)
+            val taskObj = JSONObject()
+            taskObj.put("shop_id", shopId)
+            taskObj.put("good_id", goodId)
+            taskObj.put("country", country)
+            taskObj.put("trace_id", traceId)
+            taskObj.put("content", JSONObject(decrypted))
+            taskObj.put("phone", TokenManager.getUsername())
+            body.put("task", taskObj)
+
+            val jsonBody = body.toString()
+                .toRequestBody("application/json; charset=utf-8".toMediaType())
+            val request = Request.Builder()
+                .url(ApiConfig.TEAM_BASE_URL + ApiConfig.TEAM_TASK_UPLOAD_PATH)
+                .post(jsonBody)
+                .build()
+
+            val response = proxyClient.newCall(request).execute()
+            val json = response.body?.string() ?: throw Exception("Empty response")
+            val resp = gson.fromJson(json, TeamUploadResponse::class.java)
+            if (resp.success || resp.code == 200) {
+                ExtSubmitResponse(success = true, code = resp.code.toString())
+            } else {
+                ExtSubmitResponse(success = false, error = resp.msg ?: "上传失败")
+            }
+        } catch (e: Exception) {
+            ExtSubmitResponse(success = false, error = e.message ?: "上传异常")
         }
-        return ajiePost<ExtSubmitResponse>("submit", body)
+    }
+
+    /**
+     * 调用后台解密接口（?act=decrypt_test），返回解密并提取后的商品 JSON。
+     * 优先 submit_result（与回传链路一致的最终结果），其次 aes_extracted / plain_extracted。
+     */
+    suspend fun decryptSubmitData(encrypted: String): String = withContext(Dispatchers.IO) {
+        try {
+            val body = JSONObject()
+            body.put("data", encrypted)
+            val jsonBody = body.toString()
+                .toRequestBody("application/json; charset=utf-8".toMediaType())
+            val request = Request.Builder()
+                .url(ApiConfig.DECRYPT_URL)
+                .post(jsonBody)
+                .build()
+
+            val response = proxyClient.newCall(request).execute()
+            val json = response.body?.string() ?: return@withContext ""
+            val obj = JSONObject(json)
+            obj.optString("submit_result")
+                .ifBlank { obj.optString("aes_extracted") }
+                .ifBlank { obj.optString("plain_extracted") }
+        } catch (_: Exception) {
+            ""
+        }
     }
 
     suspend fun reportFingerprintEvent(event: String, fpName: String, fpJson: String) = withContext(Dispatchers.IO) {

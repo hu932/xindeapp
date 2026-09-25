@@ -30,7 +30,7 @@ class LoginActivity : AppCompatActivity() {
             val accountId = binding.etUsername.text.toString().trim()
 
             if (accountId.isEmpty()) {
-                Toast.makeText(this, "请输入下发ID", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "请输入手机号", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 

@@ -152,7 +152,7 @@ class TaskService : android.app.Service() {
                 prefs.edit().putBoolean("chat_mode", enabled).apply()
                 updateFloatStatus(if (enabled) "已开启聊一聊（需在Shopee聊天页）" else "已关闭聊一聊")
                 if (enabled && !ChatAccessibilityService.isReady()) {
-                    updateFloatStatus("聊一聊需先在系统设置开启无障碍【Ajie 聊一聊助手】")
+                    updateFloatStatus("聊一聊需先在系统设置开启无障碍【团队C 聊一聊助手】")
                 }
             }
         }
@@ -254,7 +254,7 @@ class TaskService : android.app.Service() {
             .replace("自动领取任务", "领任务")
             .replace("自动执行", "自动")
             .replace("当日上传成功", "今日")
-        statusMessage = "$compactMessage\n下发ID:${TokenManager.getUsername()} 今日:$uploadCount"
+        statusMessage = "$compactMessage\n手机号:${TokenManager.getUsername()} 今日:$uploadCount"
         handler.post { if (!isCollapsed) tvStatus?.text = statusMessage }
         try { sendBroadcast(Intent("com.app.helper.LOG_ACTION").putExtra("log_msg", message)) } catch (_: Exception) {}
     }

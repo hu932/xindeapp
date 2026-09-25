@@ -70,9 +70,9 @@ class MainActivity : AppCompatActivity() {
     private fun setupUI() {
         val accountCount = TokenManager.getAccountCount()
         binding.tvUsername.text = if (accountCount > 0) {
-            "下发ID：${TokenManager.getUsername()}（任务账号 $accountCount 个）"
+            "手机号：${TokenManager.getUsername()}（任务账号 $accountCount 个）"
         } else {
-            "下发ID：${TokenManager.getUsername()}"
+            "手机号：${TokenManager.getUsername()}"
         }
 
         binding.btnTestApi.setOnClickListener {
@@ -374,10 +374,10 @@ class MainActivity : AppCompatActivity() {
         val maxMs = DelayPrefs.getMaxMs(this)
         binding.tvCurrentDelay.text = "当前：${DelayPrefs.formatMs(minMs)}-${DelayPrefs.formatMs(maxMs)}"
 
-        val active = android.content.res.ColorStateList.valueOf(0xFF1976D2.toInt())
+        val active = android.content.res.ColorStateList.valueOf(0xFF3B5BDB.toInt())
         val activeText = 0xFFFFFFFF.toInt()
         val normal = android.content.res.ColorStateList.valueOf(0x00000000)
-        val normalText = 0xFF1976D2.toInt()
+        val normalText = 0xFF3B5BDB.toInt()
 
         fun apply(btn: com.google.android.material.button.MaterialButton, isActive: Boolean) {
             btn.backgroundTintList = if (isActive) active else normal
@@ -479,7 +479,7 @@ class MainActivity : AppCompatActivity() {
         val text = when {
             !on -> "未开启（开启后需保持 Shopee 停留在聊天页）"
             ready -> "无障碍已连接：可识别输入框/发送/链接/搜图页；Android 11+ 支持像素OCR"
-            else -> "已开启，但无障碍未连接——请点下方按钮到系统设置开启【Ajie 聊一聊助手】"
+            else -> "已开启，但无障碍未连接——请点下方按钮到系统设置开启【团队C 聊一聊助手】"
         }
         binding.tvChatStatus.text = text
         binding.tvChatStatus.setTextColor(
@@ -619,9 +619,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun downloadApk(apkUrl: String, versionName: String) {
         try {
-            val fileName = "Ajie-${versionName.ifBlank { "更新" }}.apk"
+            val fileName = "团队C-${versionName.ifBlank { "更新" }}.apk"
             val request = DownloadManager.Request(Uri.parse(apkUrl))
-                .setTitle("Ajie 更新")
+                .setTitle("团队C 更新")
                 .setDescription("下载完成后自动弹出安装")
                 .setMimeType("application/vnd.android.package-archive")
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)

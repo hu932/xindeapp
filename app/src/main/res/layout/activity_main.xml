@@ -9,7 +9,7 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="#1976D2"
+        android:background="#1A2A6B"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:padding="16dp">
@@ -18,7 +18,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Ajie"
+            android:text="团队C"
             android:textColor="#FFFFFF"
             android:textSize="20sp"
             android:textStyle="bold" />
@@ -302,7 +302,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text="当前：3-8 秒"
-                            android:textColor="#1976D2"
+                            android:textColor="#3B5BDB"
                             android:textSize="13sp"
                             android:textStyle="bold" />
                     </LinearLayout>

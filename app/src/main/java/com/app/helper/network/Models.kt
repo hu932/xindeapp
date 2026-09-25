@@ -141,7 +141,14 @@ data class ExtTask(
     @SerializedName("taskApiType") val taskApiType: Int = 0,
     @SerializedName("task_api_type") val taskApiTypeSnake: Int = 0,
     @SerializedName("taskRuntimeScope") val taskRuntimeScope: String = "",
-    @SerializedName("task_runtime_scope") val taskRuntimeScopeSnake: String = ""
+    @SerializedName("task_runtime_scope") val taskRuntimeScopeSnake: String = "",
+    // ===== 团队C 任务扩展字段 =====
+    @SerializedName("country") val country: String = "",
+    @SerializedName("taskType") val taskType: String = "",
+    @SerializedName("shopId") val shopId: String = "",
+    @SerializedName("goodId") val goodId: String = "",
+    @SerializedName("traceId") val traceId: String = "",
+    @SerializedName("rawType") val rawType: String = ""
 ) {
     fun id(): String = taskId.ifBlank { dealId }
     fun pageUrl(): String = url.ifBlank { taskUrl }
@@ -193,3 +200,54 @@ data class HeartbeatExtResponse(
     @SerializedName("error") val error: String? = null,
     @SerializedName("data") val data: HeartbeatExtData? = null
 )
+
+// ===== 团队C 任务平台模型 =====
+
+data class TeamTask(
+    @SerializedName("type") val type: String = "",
+    @SerializedName("data") val data: TeamTaskData? = null
+)
+
+data class TeamTaskData(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("shop_id") val shopId: String = "",
+    @SerializedName("good_id") val goodId: String = "",
+    @SerializedName("country") val country: String = "",
+    @SerializedName("trace_id") val traceId: String = "",
+    @SerializedName("type") val type: String = ""
+)
+
+data class TeamTakeResponse(
+    @SerializedName("code") val code: Int = 0,
+    @SerializedName("success") val success: Boolean = false,
+    @SerializedName("task") val task: TeamTask? = null
+)
+
+data class TeamUploadResponse(
+    @SerializedName("code") val code: Int = 0,
+    @SerializedName("success") val success: Boolean = false,
+    @SerializedName("msg") val msg: String? = null,
+    @SerializedName("data") val data: JsonElement? = null
+)
+
+/**
+ * 把团队C 平台的任务映射成 ExtTask，让 TaskService 现有的执行流程（shopId/itemId/url）保持不变。
+ */
+fun mapTeamTask(t: TeamTask): ExtTask {
+    val d = t.data
+    val shopId = d?.shopId ?: ""
+    val goodId = d?.goodId ?: ""
+    val id = d?.traceId?.takeIf { it.isNotBlank() } ?: d?.id ?: ""
+    val url = "https://shopee.tw/product/$shopId/$goodId"
+    return ExtTask(
+        taskId = id,
+        url = url,
+        taskUrl = url,
+        country = d?.country ?: "",
+        taskType = t.type.ifBlank { d?.type ?: "" },
+        rawType = t.type,
+        shopId = shopId,
+        goodId = goodId,
+        traceId = id
+    )
+}
