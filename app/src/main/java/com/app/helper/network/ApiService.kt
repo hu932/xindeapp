@@ -93,14 +93,15 @@ object ApiService {
     }
 
     suspend fun heartbeat(): HeartbeatResponse {
-        val resp = ajiePost<HeartbeatExtResponse>("heartbeat", ajieBody())
+        // 团队C：手机号本地登录，无账号白名单，心跳直接放行（不再走旧代理账号校验，
+        // 否则手机号不在旧账号列表里会返回 account not allowed 导致设备被禁用）。
         return HeartbeatResponse(
-            ok = resp.success,
-            allowed = resp.data?.allowed ?: true,
-            msg = resp.msg ?: resp.error ?: "",
-            deviceKey = resp.data?.deviceKey ?: "",
-            riskControl = resp.data?.riskControl ?: false,
-            riskMsg = resp.data?.riskMsg ?: ""
+            ok = true,
+            allowed = true,
+            msg = "",
+            deviceKey = "",
+            riskControl = false,
+            riskMsg = ""
         )
     }
 
