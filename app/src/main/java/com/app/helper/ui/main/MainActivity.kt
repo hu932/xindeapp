@@ -32,6 +32,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -68,26 +70,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupUI() {
-        val accountCount = TokenManager.getAccountCount()
-        binding.tvUsername.text = if (accountCount > 0) {
-            "手机号：${TokenManager.getUsername()}（任务账号 $accountCount 个）"
-        } else {
-            "手机号：${TokenManager.getUsername()}"
-        }
+        binding.tvUsername.text = currentModeLabel()
+        startModePolling()
 
         binding.btnTestApi.setOnClickListener {
             showDelayConfigDialog()
-        }
-
-        binding.etDeviceName.setText(TokenManager.getDeviceName())
-        binding.btnSaveDeviceName.setOnClickListener {
-            val name = binding.etDeviceName.text.toString().trim()
-            TokenManager.saveDeviceName(name)
-            Toast.makeText(
-                this,
-                "机器备注已保存：" + name.ifBlank { "默认（安卓设备）" },
-                Toast.LENGTH_SHORT
-            ).show()
         }
 
         binding.btnDelay01s.setOnClickListener { applyDelayPreset(100L, 100L) }
@@ -133,6 +120,23 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnClearLog.setOnClickListener { binding.tvLogs.text = "" }
+    }
+
+    private fun currentModeLabel(): String =
+        if (TokenManager.getInventoryMode()) "库存模式" else "普通模式"
+
+    // 每 3 秒与后台同步当前模式（库存/普通）
+    private fun startModePolling() {
+        activityScope.launch {
+            while (isActive) {
+                try {
+                    ApiService.refreshInventoryMode()
+                } catch (_: Exception) {
+                }
+                binding.tvUsername.text = currentModeLabel()
+                delay(3000)
+            }
+        }
     }
 
     private fun setupTabs() {
@@ -392,7 +396,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupPauseConfig() {
         val prefs = getSharedPreferences("task_config", MODE_PRIVATE)
-        binding.switchPauseEnabled.isChecked = prefs.getBoolean("pause_enabled", true)
+        binding.switchPauseEnabled.isChecked = prefs.getBoolean("pause_enabled", false)
         binding.etPauseCount.setText(prefs.getInt("pause_count", 30).toString())
         binding.etPauseMinutes.setText(prefs.getInt("pause_minutes", 30).toString())
 
@@ -479,7 +483,7 @@ class MainActivity : AppCompatActivity() {
         val text = when {
             !on -> "未开启（开启后需保持 Shopee 停留在聊天页）"
             ready -> "无障碍已连接：可识别输入框/发送/链接/搜图页；Android 11+ 支持像素OCR"
-            else -> "已开启，但无障碍未连接——请点下方按钮到系统设置开启【团队C 聊一聊助手】"
+            else -> "已开启，但无障碍未连接——请点下方按钮到系统设置开启【Ajie 聊一聊助手】"
         }
         binding.tvChatStatus.text = text
         binding.tvChatStatus.setTextColor(
@@ -619,9 +623,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun downloadApk(apkUrl: String, versionName: String) {
         try {
-            val fileName = "团队C-${versionName.ifBlank { "更新" }}.apk"
+            val fileName = "Ajie-${versionName.ifBlank { "更新" }}.apk"
             val request = DownloadManager.Request(Uri.parse(apkUrl))
-                .setTitle("团队C 更新")
+                .setTitle("Ajie 更新")
                 .setDescription("下载完成后自动弹出安装")
                 .setMimeType("application/vnd.android.package-archive")
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)

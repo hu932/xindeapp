@@ -1,5 +1,6 @@
 package com.app.helper.service
 
+import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -88,7 +89,7 @@ class TaskService : android.app.Service() {
     @Volatile private var pendingFileContent: String? = null
 
     private val prefs by lazy { getSharedPreferences(PREF_NAME, MODE_PRIVATE) }
-    private val pauseEnabled get() = prefs.getBoolean("pause_enabled", true)
+    private val pauseEnabled get() = prefs.getBoolean("pause_enabled", false)
     private val pauseCount get() = prefs.getInt("pause_count", 30)
     private val pauseMinutes get() = prefs.getInt("pause_minutes", 30)
     private val silentMode get() = prefs.getBoolean("silent_mode", false)
@@ -128,7 +129,7 @@ class TaskService : android.app.Service() {
                 updateFloatStatus("延时已设置: ${DelayPrefs.formatMs(minMs)}-${DelayPrefs.formatMs(maxMs)}")
             }
             "SET_PAUSE" -> {
-                val enabled = intent.getBooleanExtra("pause_enabled", true)
+                val enabled = intent.getBooleanExtra("pause_enabled", false)
                 val count = intent.getIntExtra("pause_count", 30)
                 val minutes = intent.getIntExtra("pause_minutes", 30)
                 prefs.edit()
@@ -152,7 +153,7 @@ class TaskService : android.app.Service() {
                 prefs.edit().putBoolean("chat_mode", enabled).apply()
                 updateFloatStatus(if (enabled) "已开启聊一聊（需在Shopee聊天页）" else "已关闭聊一聊")
                 if (enabled && !ChatAccessibilityService.isReady()) {
-                    updateFloatStatus("聊一聊需先在系统设置开启无障碍【团队C 聊一聊助手】")
+                    updateFloatStatus("聊一聊需先在系统设置开启无障碍【Ajie 聊一聊助手】")
                 }
             }
         }
@@ -417,7 +418,18 @@ class TaskService : android.app.Service() {
                 }
 
                 updateFloatStatus("等待数据回传...")
-                if (!waitForFileContent()) {
+                var gotContent = waitForData()
+                if (!gotContent) {
+                    // 白屏重试：结束虾皮进程 → 重启 → 重新打开商品页抓取
+                    updateFloatStatus("首次获取失败，重启虾皮应用重试...")
+                    forceStopShopee()
+                    delay(1500)
+                    launchShopeeProduct()
+                    updateFloatStatus("重启后重新等待数据回传...")
+                    gotContent = waitForData()
+                }
+                if (!gotContent) {
+                    recordDataTimeout()
                     // 回传超时/失败也要先回聊天页，否则下个任务会在商品页上开始。
                     // 用 isUploading 挡住倒计时，避免还没回到聊天页就开始领下一个任务。
                     isUploading = true
@@ -425,6 +437,7 @@ class TaskService : android.app.Service() {
                     isUploading = false
                     return@launch
                 }
+                consecutiveTimeouts = 0
 
                 val content = pendingFileContent!!
                 pendingFileContent = null
@@ -488,16 +501,18 @@ class TaskService : android.app.Service() {
         }
     }
 
-    private suspend fun waitForFileContent(): Boolean {
-        val timeout = 20_000L
+    // 纯等待数据回传（不做超时计数等副作用）
+    private suspend fun waitForData(timeoutMs: Long = 20_000L): Boolean {
         val start = System.currentTimeMillis()
-        while (System.currentTimeMillis() - start < timeout) {
-            if (pendingFileContent != null) {
-                consecutiveTimeouts = 0
-                return true
-            }
+        while (System.currentTimeMillis() - start < timeoutMs) {
+            if (pendingFileContent != null) return true
             delay(500)
         }
+        return false
+    }
+
+    // 记录一次“超时未回传”，连续 2 次则暂停并上报风控
+    private fun recordDataTimeout() {
         consecutiveTimeouts++
         if (consecutiveTimeouts >= 2) {
             isAutoRunning = false
@@ -510,11 +525,28 @@ class TaskService : android.app.Service() {
             }
             updateFloatStatus("该设备已触发风控，请及时更换账号\n（连续${consecutiveTimeouts}次超时，已自动暂停）")
             consecutiveTimeouts = 0
-            return false
+        } else {
+            updateFloatStatus("数据回传超时\n连续超时${consecutiveTimeouts}次，3秒后重试")
+            if (isAutoRunning) startNextTaskCycle(forceDelaySec = 3)
         }
-        updateFloatStatus("数据回传超时(${timeout/1000}s)\n连续超时${consecutiveTimeouts}次，3秒后重试")
-        if (isAutoRunning) startNextTaskCycle(forceDelaySec = 3)
-        return false
+    }
+
+    // 白屏重试：先回桌面把虾皮置为后台，再结束进程
+    private suspend fun forceStopShopee() {
+        try {
+            val home = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(home)
+            delay(800)
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            am.killBackgroundProcesses(ApiConfig.TARGET_PACKAGE)
+            updateFloatStatus("已结束虾皮进程，准备重启")
+        } catch (e: Exception) {
+            Log.w(TAG, "forceStopShopee failed", e)
+            updateFloatStatus("结束虾皮进程失败: ${e.message}")
+        }
     }
 
     private suspend fun submitTaskResult1(fileContent: String) {
