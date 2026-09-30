@@ -255,7 +255,7 @@ class TaskService : android.app.Service() {
             .replace("自动领取任务", "领任务")
             .replace("自动执行", "自动")
             .replace("当日上传成功", "今日")
-        statusMessage = "$compactMessage\n手机号:${TokenManager.getUsername()} 今日:$uploadCount"
+        statusMessage = "$compactMessage\n下发ID：${TokenManager.getUsername()} 今日:$uploadCount"
         handler.post { if (!isCollapsed) tvStatus?.text = statusMessage }
         try { sendBroadcast(Intent("com.app.helper.LOG_ACTION").putExtra("log_msg", message)) } catch (_: Exception) {}
     }
