@@ -7,7 +7,6 @@ import android.os.StatFs;
 import android.provider.MediaStore;
 import android.util.Log;
 import java.security.MessageDigest;
-import java.security.SecureRandom;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -22,17 +21,13 @@ import org.json.JSONObject;
 
 public abstract class f {
     public static final HashMap<String, String> a = new HashMap<>();
-    public static final SecureRandom b = new SecureRandom();
+    public static final Random b = new Random();
     public static final char[] c = "0123456789abcdef".toCharArray();
 
     public static void a() {
         HashMap<String, String> m = f.a;
-        // 每台设备唯一的聚类字段（原来写死成同一个值，所有环境都一样 → 平台按此聚类封控）
-        String clusterId = b(32);
-        String rnd9a = String.valueOf(100000000 + f.b.nextInt(900000000));
-        String rnd9b = String.valueOf(100000000 + f.b.nextInt(900000000));
         m.put("0x16","false");m.put("0x19","false");m.put("0x1a","0");m.put("0x1e","false");
-        m.put("0x20","false");m.put("0x28","false");m.put("0x3d",clusterId);
+        m.put("0x20","false");m.put("0x28","false");m.put("0x3d","0efde111a560f04fb73e18fd00cc8afa");
         m.put("0x46","false");m.put("0x49","false");m.put("0x4a","false");m.put("0x4b","false");
         m.put("0x6f","false");m.put("0x70","false");m.put("0x71","false");m.put("0x73","0");
         m.put("0x78","[]");m.put("0x79","[]");m.put("0x8e","false");m.put("0x96","false");
@@ -42,9 +37,9 @@ public abstract class f {
         m.put("0xc0","0");m.put("0xc1","0");m.put("0xc2","0");
         m.put("0x122","[\"/apex/com.android.runtime/bin/linker64\",\"/apex/com.android.runtime/lib64/bionic/libdl.so\",\"[anon:bytehook-plt-trampolines]\",\"[anon:shadowhook-enter]\",\"[anon:shadowhook-exit]\",\"[anon:shadowhook-hub-trampo]\"]");
         m.put("0x1f","false");m.put("0xab","1");m.put("0xb2","false");m.put("0xb5","2");
-        m.put("0xb6",clusterId);m.put("0xb7","{\"cf\": 0, \"or\": 0}");
+        m.put("0xb6","0efde111a560f04fb73e18fd00cc8afa");m.put("0xb7","{\"cf\": 0, \"or\": 0}");
         m.put("0xbd","0");m.put("0xe1","false");m.put("0xf6","2,0");
-        m.put("0x11d",rnd9a);m.put("0x11e",rnd9b);m.put("0x121","0");m.put("0x123","{}");
+        m.put("0x11d","000000000");m.put("0x11e","000000000");m.put("0x121","0");m.put("0x123","{}");
         m.put("0x13e","71919287");m.put("0x13f","7");m.put("0x14c","0");
     }
 

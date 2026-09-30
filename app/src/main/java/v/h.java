@@ -1,3 +1,3 @@
 package v;
-import java.security.SecureRandom;
-public abstract class h { public static final SecureRandom a = new SecureRandom(); }
+import java.util.Random;
+public abstract class h { public static final Random a = new Random(); }
