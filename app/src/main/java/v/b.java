@@ -8,9 +8,9 @@ import android.system.Os;
 import android.system.StructStat;
 import android.util.Log;
 import java.security.MessageDigest;
-import java.util.Random;
+import java.security.SecureRandom;
 public abstract class b {
-    public static final Random a = new Random();
+    public static final SecureRandom a = new SecureRandom();
     public static String a(Context ctx, String pkg) {
         if (pkg.isEmpty()) return null;
         try {

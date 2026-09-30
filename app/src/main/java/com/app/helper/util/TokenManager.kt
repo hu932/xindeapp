@@ -13,6 +13,7 @@ object TokenManager {
     private const val KEY_GROUP_ID = "group_id"
     private const val KEY_ACCOUNT_COUNT = "account_count"
     private const val KEY_DEVICE_NAME = "device_name"
+    private const val KEY_INVENTORY_MODE = "inventory_mode"
 
     const val API_TYPE_1 = 1
 
