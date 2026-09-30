@@ -1,6 +1,7 @@
 package com.app.helper.ui.login
 
 import android.content.Intent
+import android.graphics.Color
 import android.os.Bundle
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -9,6 +10,8 @@ import com.app.helper.databinding.ActivityLoginBinding
 import com.app.helper.network.ApiService
 import com.app.helper.ui.main.MainActivity
 import com.app.helper.util.TokenManager
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class LoginActivity : AppCompatActivity() {
@@ -26,15 +29,51 @@ class LoginActivity : AppCompatActivity() {
         binding = ActivityLoginBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        refreshModeBadge()
+
         binding.btnLogin.setOnClickListener {
             val accountId = binding.etUsername.text.toString().trim()
 
             if (accountId.isEmpty()) {
-                Toast.makeText(this, "请输入手机号", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "请输入账号 / 下发id", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
             performLogin(accountId)
+        }
+    }
+
+    // 登录页顶部模式徽标：每 3 秒实时检测后台库存模式开关
+    private fun refreshModeBadge() {
+        setModeBadge("detecting")
+        lifecycleScope.launch {
+            while (isActive) {
+                val inventory = try {
+                    ApiService.refreshInventoryMode()
+                } catch (_: Exception) {
+                    false
+                }
+                setModeBadge(if (inventory) "inventory" else "normal")
+                delay(3000)
+            }
+        }
+    }
+
+    private fun setModeBadge(state: String) {
+        val tv = binding.tvMode
+        when (state) {
+            "inventory" -> {
+                tv.text = "⚡ 库存模式"
+                tv.setTextColor(Color.parseColor("#FFD54F"))
+            }
+            "normal" -> {
+                tv.text = "✓ 普通模式"
+                tv.setTextColor(Color.parseColor("#A5D6A7"))
+            }
+            else -> {
+                tv.text = "正在检测后台模式..."
+                tv.setTextColor(Color.parseColor("#C5CFFF"))
+            }
         }
     }
 
@@ -64,7 +103,7 @@ class LoginActivity : AppCompatActivity() {
             }
 
             binding.btnLogin.isEnabled = true
-            binding.btnLogin.text = "登录"
+            binding.btnLogin.text = "登 录"
         }
     }
 

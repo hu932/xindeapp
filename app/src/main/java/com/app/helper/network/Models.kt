@@ -159,9 +159,27 @@ data class ExtTask(
     fun runtimeScope(): String = taskRuntimeScope.ifBlank { taskRuntimeScopeSnake }
     fun parseShopId(): Long {
         val parts = pageUrl().trimEnd('/').split("/")
-        return if (parts.size >= 2) parts[parts.size - 2].toLongOrNull() ?: 0L else 0L
+        val pathShop = if (parts.size >= 2) parts[parts.size - 2].toLongOrNull() ?: 0L else 0L
+        if (pathShop > 0) return pathShop
+        return queryParam("shop_id") ?: 0L
     }
-    fun parseItemId(): Long = pageUrl().trimEnd('/').split("/").lastOrNull()?.toLongOrNull() ?: 0L
+    fun parseItemId(): Long {
+        val parts = pageUrl().trimEnd('/').split("/")
+        val pathItem = parts.lastOrNull()?.toLongOrNull() ?: 0L
+        if (pathItem > 0) return pathItem
+        return queryParam("item_id") ?: 0L
+    }
+    private fun queryParam(key: String): Long? {
+        val url = pageUrl()
+        val idx = url.indexOf('?')
+        if (idx < 0) return null
+        val query = url.substring(idx + 1)
+        for (pair in query.split("&")) {
+            val kv = pair.split("=", limit = 2)
+            if (kv.size == 2 && kv[0] == key) return kv[1].toLongOrNull()
+        }
+        return null
+    }
 }
 
 data class ExtTakeResponse(

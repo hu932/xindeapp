@@ -589,8 +589,8 @@ class TaskService : android.app.Service() {
     private fun triggerPauseRestIfNeeded(): Boolean {
         if (!pauseEnabled) return false
         val threshold = pauseCount.coerceAtLeast(1)
-        // 休息时长随机 ±25%，避免固定周期被风控识别
-        val minutes = (pauseMinutes * (0.75 + kotlin.random.Random.nextDouble() * 0.5)).toInt().coerceAtLeast(3)
+        // 休息时长严格按用户设置，不做随机浮动
+        val minutes = pauseMinutes.coerceAtLeast(1)
         if (sessionUploadCount < threshold) return false
 
         sessionUploadCount = 0

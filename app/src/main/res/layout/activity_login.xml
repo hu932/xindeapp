@@ -1,88 +1,120 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/bg_login"
-    android:gravity="center"
-    android:orientation="vertical"
-    android:padding="28dp">
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="团队C"
-        android:textColor="#FFFFFF"
-        android:textSize="40sp"
-        android:textStyle="bold" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:background="@drawable/bg_go_badge"
-        android:paddingStart="14dp"
-        android:paddingEnd="14dp"
-        android:paddingTop="5dp"
-        android:paddingBottom="5dp"
-        android:text="高效 · 稳定 · 智能分发"
-        android:textColor="#FFFFFF"
-        android:textSize="12sp"
-        android:textStyle="bold" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
-        android:layout_marginBottom="32dp"
-        android:text="团队C 任务自动化平台"
-        android:textColor="#B9C8FF"
-        android:textSize="13sp" />
+    android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@drawable/bg_login_card"
+        android:gravity="center_horizontal"
         android:orientation="vertical"
-        android:padding="24dp">
+        android:paddingStart="28dp"
+        android:paddingEnd="28dp"
+        android:paddingTop="48dp"
+        android:paddingBottom="32dp">
+
+        <FrameLayout
+            android:layout_width="108dp"
+            android:layout_height="108dp">
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@drawable/bg_login_logo_square" />
+
+            <ImageView
+                android:layout_width="58dp"
+                android:layout_height="58dp"
+                android:layout_gravity="center"
+                android:contentDescription="@string/app_name"
+                android:src="@drawable/ic_bolt" />
+        </FrameLayout>
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="20dp"
-            android:text="手机号登录"
-            android:textColor="#1A2A6B"
-            android:textSize="18sp"
+            android:layout_marginTop="18dp"
+            android:letterSpacing="0.12"
+            android:text="Ajie"
+            android:textColor="#FFFFFF"
+            android:textSize="40sp"
             android:textStyle="bold" />
 
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent"
+        <TextView
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="22dp"
-            android:hint="手机号">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/et_username"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="phone" />
-        </com.google.android.material.textfield.TextInputLayout>
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_login"
-            android:layout_width="match_parent"
-            android:layout_height="50dp"
-            android:text="登 录"
-            android:textSize="16sp" />
+            android:layout_marginTop="8dp"
+            android:text="普通 · 库存 双模式任务自动化"
+            android:textColor="#D7E0FF"
+            android:textSize="14sp"
+            android:textStyle="bold" />
 
         <TextView
-            android:layout_width="match_parent"
+            android:id="@+id/tv_mode"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:gravity="center"
-            android:text="极速领取 · 数据安全回传"
-            android:textColor="#999999"
-            android:textSize="12sp" />
-    </LinearLayout>
+            android:background="@drawable/bg_go_badge"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:text="正在检测后台模式..."
+            android:textColor="#C5CFFF"
+            android:textSize="13sp"
+            android:textStyle="bold" />
 
-</LinearLayout>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="34dp"
+            android:background="@drawable/bg_login_card"
+            android:orientation="vertical"
+            android:padding="24dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="20dp"
+                android:text="账号登录"
+                android:textColor="#1A2A6B"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="22dp"
+                android:hint="下发id / 手机号">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/et_username"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="text" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_login"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:text="登 录"
+                android:textSize="16sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:gravity="center"
+                android:lineSpacingExtra="3dp"
+                android:text="后台未开启库存 = 普通模式\n开启库存 = 库存模式"
+                android:textColor="#999999"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>
+
 

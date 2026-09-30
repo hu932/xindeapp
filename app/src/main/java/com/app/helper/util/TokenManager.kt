@@ -40,6 +40,9 @@ object TokenManager {
     fun saveDeviceName(name: String) { prefs.edit().putString(KEY_DEVICE_NAME, name).apply() }
     fun getDeviceName(): String = prefs.getString(KEY_DEVICE_NAME, "") ?: ""
 
+    fun saveInventoryMode(enabled: Boolean) { prefs.edit().putBoolean(KEY_INVENTORY_MODE, enabled).apply() }
+    fun getInventoryMode(): Boolean = prefs.getBoolean(KEY_INVENTORY_MODE, false)
+
     fun isLoggedIn(): Boolean = getToken().isNotEmpty()
 
     fun logout() { prefs.edit().clear().apply() }
