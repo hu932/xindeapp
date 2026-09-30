@@ -157,6 +157,8 @@ object ApiService {
             .ifBlank { taskObj.optString("id", "") }
         val shopId = taskObj.optString("shopId", "").ifBlank { taskObj.optString("shop_id", "") }
         val goodId = taskObj.optString("goodId", "").ifBlank { taskObj.optString("good_id", "") }
+        val runtimeScope = taskObj.optString("taskRuntimeScope", "")
+            .ifBlank { taskObj.optString("task_runtime_scope", "") }
         return ExtTask(
             taskId = traceId,
             dealId = taskObj.optString("deal_id", traceId),
@@ -167,7 +169,8 @@ object ApiService {
             rawType = taskObj.optString("type", ""),
             shopId = shopId,
             goodId = goodId,
-            traceId = traceId
+            traceId = traceId,
+            taskRuntimeScope = runtimeScope
         )
     }
 
@@ -227,14 +230,15 @@ object ApiService {
                     ExtSubmitResponse(success = false, error = obj.optString("msg", "上传失败"))
                 }
             } else {
-                val body = JSONObject()
-                body.put("accountId", TokenManager.getUsername())
-                body.put("token", TokenManager.getToken())
-                body.put("deal_id", taskId.ifBlank { task.id() })
-                body.put("task_id", taskId.ifBlank { task.id() })
-                body.put("url", taskPageUrl.ifBlank { task.pageUrl() })
-                body.put("data", rawResponse)
-                val jsonBody = body.toString()
+                // 普通模式：带上与领取一致的设备上下文 + taskRuntimeScope，才能匹配到租约
+                val body = ajieBody()
+                body["deal_id"] = taskId.ifBlank { task.id() }
+                body["task_id"] = taskId.ifBlank { task.id() }
+                body["url"] = taskPageUrl.ifBlank { task.pageUrl() }
+                body["taskRuntimeScope"] = task.runtimeScope()
+                body["task_runtime_scope"] = task.runtimeScope()
+                body["data"] = rawResponse
+                val jsonBody = gson.toJson(body)
                     .toRequestBody("application/json; charset=utf-8".toMediaType())
                 val request = Request.Builder()
                     .url(ApiConfig.GO_BASE_URL + ApiConfig.API_SUBMIT_PATH)
