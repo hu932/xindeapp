@@ -27,5 +27,28 @@ csyx_reference_v_*.java
 /app/.auth_hash
 /app/accounts_share_data.php
 
+# go-server runtime state — never commit these
+/go-server/.auth_hash
+/go-server/.resolve_pref.json
+/go-server/*.jsonl
+/go-server/app_update.json
+/go-server/plugin_update.json
+/go-server/version_controls.json
+/go-server/device_controls.json
+/go-server/android_sessions.json
+/go-server/api1_token.json
+/go-server/api2_token.json
+/go-server/api1_token_map.json
+/go-server/sub_accounts.json
+/go-server/sub_account_tokens.json
+/go-server/sub_account_usage.json
+/go-server/sub_account_bindings.json
+/go-server/app_updates/
+/go-server/plugin_updates/
+/go-server/daily_stats/
+/go-server/fingerprint_env_stats/
+/go-server/decoded_extension_runtime/
+/go-server/cx_cache/
+
 # pasted screenshots / scratch images at repo root
 /image-*.png
