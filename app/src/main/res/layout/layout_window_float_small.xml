@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/ll_small"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_float_panel"
+    android:elevation="6dp"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="8dp"
+    android:paddingTop="3dp"
+    android:paddingEnd="8dp"
+    android:paddingBottom="3dp">
+
+    <TextView
+        android:id="@+id/tv_small_status"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:maxWidth="120dp"
+        android:text="等待开始"
+        android:textColor="#FFEB3B"
+        android:textSize="10sp" />
+
+    <TextView
+        android:id="@+id/tv_small_count"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="6dp"
+        android:text="完成:0 失败:0"
+        android:textColor="#FFFFFF"
+        android:textSize="10sp" />
+</LinearLayout>

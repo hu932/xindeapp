@@ -1,6 +1,5 @@
 package com.app.helper.service
 
-import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -20,6 +19,7 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.widget.CheckBox
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -59,6 +59,10 @@ class TaskService : android.app.Service() {
     private var llDotContainer: LinearLayout? = null
     private var llExpanded: LinearLayout? = null
     private var imgClose: ImageView? = null
+    private var tvSmallStatus: TextView? = null
+    private var tvSmallCount: TextView? = null
+    private var llSmall: LinearLayout? = null
+    private var cbSmallWindow: CheckBox? = null
     private var isCollapsed = false
 
     private var isAutoRunning = false
@@ -68,6 +72,7 @@ class TaskService : android.app.Service() {
     private var currentItemId = 0L
     private var currentTask: ExtTask? = null
     private var statusMessage = ""
+    private var compactStatusMessage = ""
     private var uploadCount = 0
     private var failedCount = 0
     private var targetVersion = "未知"
@@ -82,6 +87,7 @@ class TaskService : android.app.Service() {
 
     private var touchDownX = 0f
     private var touchDownY = 0f
+    private var touchDownTime = 0L
     private var windowX = 0
     private var windowY = 0
 
@@ -94,6 +100,7 @@ class TaskService : android.app.Service() {
     private val pauseMinutes get() = prefs.getInt("pause_minutes", 30)
     private val silentMode get() = prefs.getBoolean("silent_mode", false)
     private val chatMode get() = prefs.getBoolean("chat_mode", false)
+    private val smallWindowMode get() = prefs.getBoolean("small_window_mode", false)
     private var sessionUploadCount = 0
     private var pauseJob: Job? = null
     @Volatile private var usedChatFlow = false
@@ -156,6 +163,10 @@ class TaskService : android.app.Service() {
                     updateFloatStatus("聊一聊需先在系统设置开启无障碍【Ajie 聊一聊助手】")
                 }
             }
+            "SET_SMALL_WINDOW" -> {
+                val enabled = intent.getBooleanExtra("small_window_mode", false)
+                setSmallWindowMode(enabled)
+            }
         }
         return START_STICKY
     }
@@ -175,9 +186,13 @@ class TaskService : android.app.Service() {
 
     // ==================== Float Window ====================
 
-    private fun createFloatWindow() {
+    private fun createFloatWindow(showWelcome: Boolean = true) {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        floatView = LayoutInflater.from(this).inflate(R.layout.layout_window_float, null)
+        val small = smallWindowMode
+        floatView = LayoutInflater.from(this).inflate(
+            if (small) R.layout.layout_window_float_small else R.layout.layout_window_float,
+            null
+        )
 
         val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -191,31 +206,85 @@ class TaskService : android.app.Service() {
             PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.TOP or Gravity.START; x = 0; y = 200 }
 
-        tvStatus = floatView?.findViewById(R.id.tv_status)
-        tvAction = floatView?.findViewById(R.id.tv_action)
-        tvDot = floatView?.findViewById(R.id.tv_dot)
-        llDotContainer = floatView?.findViewById(R.id.ll_dot_container)
-        llExpanded = floatView?.findViewById(R.id.ll_expanded)
-        imgClose = floatView?.findViewById(R.id.img_close)
+        tvStatus = null
+        tvAction = null
+        tvDot = null
+        llDotContainer = null
+        llExpanded = null
+        imgClose = null
+        tvSmallStatus = null
+        tvSmallCount = null
+        llSmall = null
+        cbSmallWindow = null
 
-        tvStatus?.setOnTouchListener { _, event -> handleDrag(event) }
-        llDotContainer?.setOnTouchListener { _, event ->
-            if (event.action == MotionEvent.ACTION_DOWN) {
-                touchDownX = event.rawX; touchDownY = event.rawY
-                windowX = floatParams?.x ?: 0; windowY = floatParams?.y ?: 0
+        if (small) {
+            tvSmallStatus = floatView?.findViewById(R.id.tv_small_status)
+            tvSmallCount = floatView?.findViewById(R.id.tv_small_count)
+            llSmall = floatView?.findViewById(R.id.ll_small)
+            llSmall?.setOnTouchListener { _, event -> handleSmallWindowTouch(event) }
+        } else {
+            tvStatus = floatView?.findViewById(R.id.tv_status)
+            tvAction = floatView?.findViewById(R.id.tv_action)
+            tvDot = floatView?.findViewById(R.id.tv_dot)
+            llDotContainer = floatView?.findViewById(R.id.ll_dot_container)
+            llExpanded = floatView?.findViewById(R.id.ll_expanded)
+            imgClose = floatView?.findViewById(R.id.img_close)
+            cbSmallWindow = floatView?.findViewById(R.id.cb_small_window)
+
+            tvStatus?.setOnTouchListener { _, event -> handleDrag(event) }
+            llDotContainer?.setOnTouchListener { _, event ->
+                if (event.action == MotionEvent.ACTION_DOWN) {
+                    touchDownX = event.rawX; touchDownY = event.rawY
+                    windowX = floatParams?.x ?: 0; windowY = floatParams?.y ?: 0
+                }
+                if (event.action == MotionEvent.ACTION_MOVE) {
+                    val dx = Math.abs(event.rawX - touchDownX)
+                    val dy = Math.abs(event.rawY - touchDownY)
+                    if (dx > 5 || dy > 5) { handleDrag(event); true } else false
+                } else false
             }
-            if (event.action == MotionEvent.ACTION_MOVE) {
-                val dx = Math.abs(event.rawX - touchDownX)
-                val dy = Math.abs(event.rawY - touchDownY)
-                if (dx > 5 || dy > 5) { handleDrag(event); true } else false
-            } else false
+            imgClose?.setOnClickListener { collapseFloat() }
+            llDotContainer?.setOnClickListener { expandFloat() }
+            tvAction?.setOnClickListener { toggleAutoTask() }
+            cbSmallWindow?.setOnCheckedChangeListener { _, checked -> setSmallWindowMode(checked) }
+            cbSmallWindow?.isChecked = false
         }
-        imgClose?.setOnClickListener { collapseFloat() }
-        llDotContainer?.setOnClickListener { expandFloat() }
-        tvAction?.setOnClickListener { toggleAutoTask() }
 
         try { windowManager?.addView(floatView, floatParams) } catch (e: Exception) { Log.e(TAG, "Float window failed", e) }
-        updateFloatStatus("点击【一键做任务】开始\n延时: ${DelayPrefs.formatMs(DelayPrefs.getMinMs(this))}-${DelayPrefs.formatMs(DelayPrefs.getMaxMs(this))}")
+        if (showWelcome) {
+            updateFloatStatus(
+                if (small) "小窗：点击开始/停止，长按返回完整窗口"
+                else "点击【一键做任务】开始\n延时: ${DelayPrefs.formatMs(DelayPrefs.getMinMs(this))}-${DelayPrefs.formatMs(DelayPrefs.getMaxMs(this))}"
+            )
+        }
+    }
+
+    private fun handleSmallWindowTouch(event: MotionEvent): Boolean {
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                touchDownX = event.rawX; touchDownY = event.rawY
+                touchDownTime = System.currentTimeMillis()
+                windowX = floatParams?.x ?: 0; windowY = floatParams?.y ?: 0
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = Math.abs(event.rawX - touchDownX)
+                val dy = Math.abs(event.rawY - touchDownY)
+                if (dx > 5 || dy > 5) {
+                    floatParams?.x = windowX + (event.rawX - touchDownX).toInt()
+                    floatParams?.y = windowY + (event.rawY - touchDownY).toInt()
+                    try { windowManager?.updateViewLayout(floatView, floatParams) } catch (_: Exception) {}
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                val dx = Math.abs(event.rawX - touchDownX)
+                val dy = Math.abs(event.rawY - touchDownY)
+                if (dx <= 5 && dy <= 5) {
+                    if (System.currentTimeMillis() - touchDownTime >= 500L) setSmallWindowMode(false)
+                    else toggleAutoTask()
+                }
+            }
+        }
+        return true
     }
 
     private fun handleDrag(event: MotionEvent): Boolean {
@@ -250,13 +319,34 @@ class TaskService : android.app.Service() {
         try { floatView?.let { windowManager?.removeView(it) } } catch (_: Exception) {}
     }
 
+    private fun setSmallWindowMode(enabled: Boolean) {
+        prefs.edit().putBoolean("small_window_mode", enabled).apply()
+        recreateFloatWindow()
+        updateFloatStatus(if (enabled) "已切换到小窗模式" else "已切换到完整悬浮窗")
+    }
+
+    private fun recreateFloatWindow() {
+        removeFloatWindow()
+        createFloatWindow(showWelcome = false)
+        applyStatusToViews(compactStatusMessage.ifEmpty { "点击【一键做任务】开始" })
+    }
+
+    private fun applyStatusToViews(compactMessage: String) {
+        compactStatusMessage = compactMessage
+        statusMessage = "$compactMessage\n下发ID：${TokenManager.getUsername()} 今日:$uploadCount"
+        handler.post {
+            if (!isCollapsed) tvStatus?.text = statusMessage
+            tvSmallStatus?.text = compactMessage
+            tvSmallCount?.text = "完成:$uploadCount 失败:$failedCount"
+        }
+    }
+
     private fun updateFloatStatus(message: String) {
         val compactMessage = message
             .replace("自动领取任务", "领任务")
             .replace("自动执行", "自动")
             .replace("当日上传成功", "今日")
-        statusMessage = "$compactMessage\n下发ID：${TokenManager.getUsername()} 今日:$uploadCount"
-        handler.post { if (!isCollapsed) tvStatus?.text = statusMessage }
+        applyStatusToViews(compactMessage)
         try { sendBroadcast(Intent("com.app.helper.LOG_ACTION").putExtra("log_msg", message)) } catch (_: Exception) {}
     }
 
@@ -418,16 +508,7 @@ class TaskService : android.app.Service() {
                 }
 
                 updateFloatStatus("等待数据回传...")
-                var gotContent = waitForData()
-                if (!gotContent) {
-                    // 白屏重试：结束虾皮进程 → 重启 → 重新打开商品页抓取
-                    updateFloatStatus("首次获取失败，重启虾皮应用重试...")
-                    forceStopShopee()
-                    delay(1500)
-                    launchShopeeProduct()
-                    updateFloatStatus("重启后重新等待数据回传...")
-                    gotContent = waitForData()
-                }
+                val gotContent = waitForData()
                 if (!gotContent) {
                     recordDataTimeout()
                     // 回传超时/失败也要先回聊天页，否则下个任务会在商品页上开始。
@@ -528,24 +609,6 @@ class TaskService : android.app.Service() {
         } else {
             updateFloatStatus("数据回传超时\n连续超时${consecutiveTimeouts}次，3秒后重试")
             if (isAutoRunning) startNextTaskCycle(forceDelaySec = 3)
-        }
-    }
-
-    // 白屏重试：先回桌面把虾皮置为后台，再结束进程
-    private suspend fun forceStopShopee() {
-        try {
-            val home = Intent(Intent.ACTION_MAIN).apply {
-                addCategory(Intent.CATEGORY_HOME)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            startActivity(home)
-            delay(800)
-            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-            am.killBackgroundProcesses(ApiConfig.TARGET_PACKAGE)
-            updateFloatStatus("已结束虾皮进程，准备重启")
-        } catch (e: Exception) {
-            Log.w(TAG, "forceStopShopee failed", e)
-            updateFloatStatus("结束虾皮进程失败: ${e.message}")
         }
     }
 

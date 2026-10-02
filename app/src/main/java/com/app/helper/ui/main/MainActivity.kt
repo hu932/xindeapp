@@ -48,6 +48,7 @@ class MainActivity : AppCompatActivity() {
     private var statsReceiver: android.content.BroadcastReceiver? = null
     private var downloadReceiver: android.content.BroadcastReceiver? = null
     private var pendingDownloadId = -1L
+    private var pendingUpdate: UpdateResponse? = null
     private val activityScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val fpAdapter = FpAdapter()
 
@@ -117,6 +118,15 @@ class MainActivity : AppCompatActivity() {
                 }
                 .setNegativeButton("取消", null)
                 .show()
+        }
+
+        binding.btnOnlineUpdate.setOnClickListener {
+            val update = pendingUpdate
+            if (update != null && update.apkUrl.isNotBlank()) {
+                downloadApk(update.apkUrl, update.versionName)
+            } else {
+                Toast.makeText(this, "暂无可用更新", Toast.LENGTH_SHORT).show()
+            }
         }
 
         binding.btnClearLog.setOnClickListener { binding.tvLogs.text = "" }
@@ -508,7 +518,7 @@ class MainActivity : AppCompatActivity() {
                     blockedMsg = intent.getStringExtra("message") ?: ""
                 )
                 if (update.apkUrl.isNotBlank()) {
-                    if (isBlocked) showBlockedDialog(update) else showUpdateDialog(update)
+                    handleUpdate(update)
                 }
             }
         }
@@ -532,15 +542,34 @@ class MainActivity : AppCompatActivity() {
     private fun checkAppUpdate() {
         activityScope.launch {
             try {
-                val currentCode = getCurrentVersionCode()
-                val update = ApiService.checkUpdate(currentCode)
-                if (update.ok && update.blocked) {
-                    showBlockedDialog(update)
-                } else if (update.ok && update.hasUpdate && update.apkUrl.isNotBlank()) {
-                    showUpdateDialog(update)
-                }
+                handleUpdate(ApiService.checkUpdate(getCurrentVersionCode()))
             } catch (_: Exception) {
             }
+        }
+    }
+
+    private fun handleUpdate(update: UpdateResponse) {
+        if (!update.ok) return
+        if (update.blocked) {
+            showBlockedDialog(update)
+            return
+        }
+        if (update.hasUpdate && update.apkUrl.isNotBlank()) {
+            pendingUpdate = update
+            showUpdateButton(update)
+            showUpdateDialog(update)
+        } else {
+            pendingUpdate = null
+            showUpdateButton(null)
+        }
+    }
+
+    private fun showUpdateButton(update: UpdateResponse?) {
+        if (update == null) {
+            binding.btnOnlineUpdate.visibility = android.view.View.GONE
+        } else {
+            binding.btnOnlineUpdate.text = "在线更新 v${update.versionName}"
+            binding.btnOnlineUpdate.visibility = android.view.View.VISIBLE
         }
     }
 
@@ -580,7 +609,7 @@ class MainActivity : AppCompatActivity() {
         val dialog = AlertDialog.Builder(this)
             .setTitle(update.title.ifBlank { "发现新版本" })
             .setMessage(msg)
-            .setPositiveButton("下载", null)
+            .setPositiveButton("在线更新", null)
             .apply {
                 if (!update.force) {
                     setNegativeButton("稍后", null)
