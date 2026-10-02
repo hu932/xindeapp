@@ -62,6 +62,8 @@ class TaskService : android.app.Service() {
     private var tvSmallStatus: TextView? = null
     private var tvSmallCount: TextView? = null
     private var llSmall: LinearLayout? = null
+    private var llSmallBody: LinearLayout? = null
+    private var tvSmallRestore: TextView? = null
     private var cbSmallWindow: CheckBox? = null
     private var isCollapsed = false
 
@@ -215,13 +217,18 @@ class TaskService : android.app.Service() {
         tvSmallStatus = null
         tvSmallCount = null
         llSmall = null
+        llSmallBody = null
+        tvSmallRestore = null
         cbSmallWindow = null
 
         if (small) {
             tvSmallStatus = floatView?.findViewById(R.id.tv_small_status)
             tvSmallCount = floatView?.findViewById(R.id.tv_small_count)
             llSmall = floatView?.findViewById(R.id.ll_small)
-            llSmall?.setOnTouchListener { _, event -> handleSmallWindowTouch(event) }
+            llSmallBody = floatView?.findViewById(R.id.ll_small_body)
+            tvSmallRestore = floatView?.findViewById(R.id.tv_small_restore)
+            llSmallBody?.setOnTouchListener { _, event -> handleSmallWindowTouch(event) }
+            tvSmallRestore?.setOnClickListener { setSmallWindowMode(false) }
         } else {
             tvStatus = floatView?.findViewById(R.id.tv_status)
             tvAction = floatView?.findViewById(R.id.tv_action)
@@ -253,7 +260,7 @@ class TaskService : android.app.Service() {
         try { windowManager?.addView(floatView, floatParams) } catch (e: Exception) { Log.e(TAG, "Float window failed", e) }
         if (showWelcome) {
             updateFloatStatus(
-                if (small) "小窗：点击开始/停止，长按返回完整窗口"
+                if (small) "小窗：点击开始/停止"
                 else "点击【一键做任务】开始\n延时: ${DelayPrefs.formatMs(DelayPrefs.getMinMs(this))}-${DelayPrefs.formatMs(DelayPrefs.getMaxMs(this))}"
             )
         }
