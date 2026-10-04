@@ -27,6 +27,7 @@ import com.app.helper.R
 import com.app.helper.chat.ChatAuto
 import com.app.helper.network.ApiConfig
 import com.app.helper.network.ApiService
+import com.app.helper.network.CouponPreflight
 import com.app.helper.network.ExtTask
 import com.app.helper.util.DelayPrefs
 import com.app.helper.util.TokenManager
@@ -103,6 +104,7 @@ class TaskService : android.app.Service() {
     private val silentMode get() = prefs.getBoolean("silent_mode", false)
     private val chatMode get() = prefs.getBoolean("chat_mode", false)
     private val smallWindowMode get() = prefs.getBoolean("small_window_mode", false)
+    private val couponPreflightEnabled get() = prefs.getBoolean("coupon_preflight_enabled", true)
     private var sessionUploadCount = 0
     private var pauseJob: Job? = null
     @Volatile private var usedChatFlow = false
@@ -456,6 +458,85 @@ class TaskService : android.app.Service() {
         }
     }
 
+    // ==================== 优惠券预检 ====================
+
+    private suspend fun awaitCouponPreflight(): Boolean {
+        if (!couponPreflightEnabled) return true
+        val profile = fetchShopeeProfile()
+        if (profile == null) {
+            updateFloatStatus("未获取到Shopee账号，跳过优惠券检测")
+            return true
+        }
+        val (userId, username) = profile
+        if (CouponPreflight.isPassedToday(userId)) return true
+
+        updateFloatStatus("优惠券数据检测中...")
+        try {
+            val start = CouponPreflight.start(userId, username)
+            if (start.allowed || !start.required) {
+                CouponPreflight.markPassed(userId, start.dayKey)
+                return true
+            }
+            val probe = start.probe
+            if (probe == null || probe.url.isBlank()) {
+                updateFloatStatus("优惠券检测商品缺失，跳过本次检测")
+                return true
+            }
+            updateFloatStatus("开始优惠券数据检测...")
+            pendingFileContent = null
+            launchProductUrl(probe.url)
+            val got = waitForData(30_000L)
+            if (!got) {
+                stopAutoForCoupon("优惠券检测超时，已停止")
+                return false
+            }
+            val raw = pendingFileContent ?: ""
+            pendingFileContent = null
+            val report = CouponPreflight.report(userId, username, probe.id, extractEncryptedData(raw))
+            if (!report.passed) {
+                stopAutoForCoupon("优惠券检测未通过: ${report.reason.ifBlank { "数据异常" }}")
+                return false
+            }
+            CouponPreflight.markPassed(userId, report.dayKey)
+            updateFloatStatus("优惠券检测通过")
+            return true
+        } catch (e: Exception) {
+            Log.w(TAG, "Coupon preflight failed", e)
+            stopAutoForCoupon("优惠券预检失败: ${e.message}")
+            return false
+        }
+    }
+
+    private fun fetchShopeeProfile(): Pair<String, String>? {
+        CouponPreflight.getAccount()?.let { return it }
+        pendingFileContent?.let { content ->
+            CouponPreflight.extractAccount(content)?.let {
+                CouponPreflight.saveAccount(it.first, it.second)
+                return it
+            }
+        }
+        return null
+    }
+
+    private suspend fun launchProductUrl(url: String) {
+        val wakeIntent = Intent(ApiConfig.WAKE_ACTION).apply {
+            setPackage(ApiConfig.TARGET_PACKAGE)
+            putExtra("url", url)
+        }
+        sendBroadcast(wakeIntent)
+        delay(1000)
+        launchVisible(url)
+    }
+
+    private fun stopAutoForCoupon(reason: String) {
+        isAutoRunning = false
+        isUploading = false
+        countdownJob?.cancel()
+        pauseJob?.cancel()
+        handler.post { tvAction?.text = "一键做任务"; tvAction?.setBackgroundResource(R.drawable.bg_float_action) }
+        updateFloatStatus(reason)
+    }
+
     private fun claimAndExecuteTask() {
         if (!deviceAllowed) {
             stopAutoForDeviceBlock()
@@ -471,6 +552,8 @@ class TaskService : android.app.Service() {
     private fun claimAndExecuteTask1() {
         serviceScope.launch {
             try {
+                if (!awaitCouponPreflight()) return@launch
+
                 val taskResponse = ApiService.takeTask()
                 if (!taskResponse.isSuccess || taskResponse.task == null) {
                     val rawMsg = taskResponse.message
@@ -847,6 +930,9 @@ class TaskService : android.app.Service() {
                         val content = readFileContent(extraData, extraPath)
                         if (content != null) {
                             pendingFileContent = content
+                            CouponPreflight.extractAccount(content)?.let {
+                                CouponPreflight.saveAccount(it.first, it.second)
+                            }
                             Log.d(TAG, "Data file read: ${content.length} bytes")
                         }
                     }

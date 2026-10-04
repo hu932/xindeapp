@@ -96,7 +96,7 @@ func handleProxyGET(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if len(filtered) > limit {
-			filtered = filtered[:limit]
+			filtered = filtered[len(filtered)-limit:]
 		}
 		writeJSONOK(w, map[string]any{"ok": true, "data": filtered})
 		return

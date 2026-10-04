@@ -136,12 +136,14 @@ func handleInventorySubmit(w http.ResponseWriter, r *http.Request) {
 		res := forwardToServer(api1SubmitURL, forwardBody, submitGzip, []string{"Authorization: Bearer " + task.Token})
 		var serverResp map[string]any
 		_ = jsonDecode(res.Response, &serverResp)
+		responseStr := compactLogResponseStr(res.Response, maxLogRespBytes)
 		if res.Error == "" && api1ForwardSuccess(serverResp) {
 			invRecordSuccess(accountID)
 			appendLog(logFile, map[string]any{
 				"ip": reqCtx.ip, "source": "inventory_submit", "status": "success",
 				"username": accountID, "account_id": accountID, "trace_id": traceID,
 				"task_id": task.TaskID, "sub_username": task.SubUsername, "task_url": task.TaskURL,
+				"http_code": res.HTTPCode, "response": responseStr,
 			}, maxLogs)
 		} else {
 			invRecordFail(accountID)
@@ -149,7 +151,9 @@ func handleInventorySubmit(w http.ResponseWriter, r *http.Request) {
 				"ip": reqCtx.ip, "source": "inventory_submit", "status": "fail",
 				"username": accountID, "account_id": accountID, "trace_id": traceID,
 				"task_id": task.TaskID, "sub_username": task.SubUsername, "task_url": task.TaskURL,
-				"error": res.Error, "forward_response_len": len(res.Response),
+				"error": res.Error, "http_code": res.HTTPCode,
+				"upstream_msg": api1SubmitFailureMessage(serverResp, res.Error),
+				"forward_response_len": len(res.Response), "response": responseStr,
 			}, maxLogs)
 		}
 	}()

@@ -1,0 +1,72 @@
+{
+  "manifest_version": 3,
+  "name": "Ajie",
+  "version": "8.0",
+  "description": "晚霞日落",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://shopee.tw/*",
+        "https://xiapi.xiapibuy.com/*"
+      ],
+      "js": [
+        "init.js",
+        "lib/jquery.js",
+        "content-script.js",
+        "coupon-preflight.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "permissions": [
+    "contextMenus",
+    "activeTab",
+    "tabs",
+    "notifications",
+    "storage",
+    "cookies",
+    "debugger",
+    "webRequest",
+    "scripting",
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess"
+  ],
+  "host_permissions": [
+    "https://*/*",
+    "http://103.146.231.72:1998/*",
+    "http://103.146.231.72:2036/*",
+    "https://zb1.eqwofaygdsjko.uk/*",
+    "https://eqwofaygdsjko.uk/*",
+    "https://shopee.tw/*",
+    "https://*.shopee.tw/*",
+    "https://xiapi.xiapibuy.com/*"
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "rules",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  }
+}
