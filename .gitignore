@@ -27,6 +27,12 @@ csyx_reference_v_*.java
 /app/.auth_hash
 /app/accounts_share_data.php
 
+# coupon-server runtime state — never commit these
+/coupon-server/storage/debug_raw_*.json
+/coupon-server/storage/session_*.json
+/coupon-server/storage/passed_*.json
+/coupon-server/storage/failed_*.json
+
 # go-server runtime state — never commit these
 /go-server/.auth_hash
 /go-server/.resolve_pref.json

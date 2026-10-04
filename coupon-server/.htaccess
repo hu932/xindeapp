@@ -1,0 +1,18 @@
+# 可选：禁止直接访问配置与公共库文件
+<FilesMatch "^(config|lib)\.php$">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order deny,allow
+    Deny from all
+  </IfModule>
+</FilesMatch>
+
+# 防止 Apache DirectorySlash 对接口目录做 301 跳转，
+# 否则 POST 请求会被重定向并降级成 GET，导致“只支持 POST 请求”。
+# 把不带斜杠的接口地址内部重写到带斜杠的目录，不改变请求方法。
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteRule ^api/coupon-preflight/(start|report)$ api/coupon-preflight/$1/ [L]
+</IfModule>
