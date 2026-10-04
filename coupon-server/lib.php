@@ -333,8 +333,12 @@ function handle_coupon_report() {
         return coupon_success(['passed' => false, 'reason' => '未找到检测任务，请先调用 start 接口', 'dayKey' => $dayKey]);
     }
 
+    // 安卓 App 上报的数据是 AES 加密的 Mars 包装，先解密取出真正的响应
+    $decryptedRaw = coupon_decrypt_raw($raw);
+    $rawForDebug = $decryptedRaw !== null ? $decryptedRaw : $raw;
+
     // 校验失败时：删掉 session，并写一条失败记录，方便后台查看
-    $fail = function ($reason) use ($sessionFile, $dayKey, $userId, $probeId, $raw) {
+    $fail = function ($reason) use ($sessionFile, $dayKey, $userId, $probeId, $rawForDebug) {
         coupon_storage_delete($sessionFile);
         coupon_storage_write('failed_' . coupon_sanitize_id($userId) . '_' . $dayKey . '.json', [
             'probeId'      => $probeId,
@@ -342,10 +346,10 @@ function handle_coupon_report() {
             'shopeeUserId' => $userId,
             'reason'       => $reason,
         ]);
-        // 诊断用：把原始上报数据存下来，排查「页面有券但判定无券」的结构差异
+        // 诊断用：把解密后的响应存下来，排查「页面有券但判定无券」的结构差异
         @file_put_contents(
             coupon_storage_path('debug_raw_' . coupon_sanitize_id($userId) . '_' . $dayKey . '.json'),
-            $raw
+            $rawForDebug
         );
         return coupon_success(['passed' => false, 'reason' => $reason, 'dayKey' => $dayKey]);
     };
@@ -357,8 +361,6 @@ function handle_coupon_report() {
         return $fail('status 必须为 captured');
     }
 
-    // 安卓 App 上报的数据是 AES 加密的 Mars 包装，先解密取出真正的响应
-    $decryptedRaw = coupon_decrypt_raw($raw);
     if ($decryptedRaw === null) {
         return $fail('采集数据解密失败');
     }
