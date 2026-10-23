@@ -207,22 +207,22 @@ class MainActivity : AppCompatActivity() {
                 lifecycleScope.launch {
                     val generated = mutableListOf<Pair<String, String>>()
                     var failed = 0
-                    repeat(count) { index ->
-                        val fp = withContext(Dispatchers.IO) {
-                            try { ApiService.fetchFingerprintEnv() } catch (e: Exception) { null }
+                    for (index in 0 until count) {
+                    val fp = withContext(Dispatchers.IO) {
+                        try { ApiService.fetchFingerprintEnv() } catch (e: Exception) { null }
+                    }
+                    if (fp == null) {
+                        failed++
+                        continue
+                    }
+                    val name = fp.optString("name", "fp_${System.currentTimeMillis()}_$index")
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            FingerprintManager.saveFingerprintData(this@MainActivity, name, fp.toString())
                         }
-                        if (fp == null) {
-                            failed++
-                            return@repeat
-                        }
-                        val name = fp.optString("name", "fp_${System.currentTimeMillis()}_$index")
-                        withContext(Dispatchers.IO) {
-                            runCatching {
-                                FingerprintManager.saveFingerprintData(this@MainActivity, name, fp.toString())
-                            }
-                        }
-                        generated.add(name to fp.toString())
-                        delay(10)
+                    }
+                    generated.add(name to fp.toString())
+                    delay(10)
                     }
                     generated.forEach { (name, data) -> reportFpEvent("generate", name, data) }
                     val msg = when {

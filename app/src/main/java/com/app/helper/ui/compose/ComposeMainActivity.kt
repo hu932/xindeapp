@@ -198,31 +198,31 @@ class ComposeMainActivity : ComponentActivity() {
         lifecycleScope.launch {
             var ok = 0
             var failReason = ""
-            repeat(count) { idx ->
-                val fp = withContext(Dispatchers.IO) {
-                    try { ApiService.fetchFingerprintEnv() } catch (e: Exception) { null }
+            for (idx in 0 until count) {
+            val fp = withContext(Dispatchers.IO) {
+                try { ApiService.fetchFingerprintEnv() } catch (e: Exception) { null }
+            }
+            if (fp == null) {
+                failReason = if (failReason.isBlank()) "服务器未返回" else failReason
+                continue
+            }
+            val name = fp.optString("name", "").ifBlank {
+                "FP-" + java.text.SimpleDateFormat(
+                    "yyyy-MM-dd HH:mm:ss", java.util.Locale.US
+                ).format(java.util.Date())
+            }
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    FingerprintManager.saveFingerprintData(
+                        this@ComposeMainActivity, name, fp.toString()
+                    )
                 }
-                if (fp == null) {
-                    failReason = if (failReason.isBlank()) "服务器未返回" else failReason
-                    return@repeat
-                }
-                val name = fp.optString("name", "").ifBlank {
-                    "FP-" + java.text.SimpleDateFormat(
-                        "yyyy-MM-dd HH:mm:ss", java.util.Locale.US
-                    ).format(java.util.Date())
-                }
-                withContext(Dispatchers.IO) {
-                    runCatching {
-                        FingerprintManager.saveFingerprintData(
-                            this@ComposeMainActivity, name, fp.toString()
-                        )
-                    }
-                }
-                try {
-                    ApiService.reportFingerprintEvent("generate", name, fp.toString())
-                } catch (_: Exception) {
-                }
-                ok++
+            }
+            try {
+                ApiService.reportFingerprintEvent("generate", name, fp.toString())
+            } catch (_: Exception) {
+            }
+            ok++
             }
             if (ok > 0) {
                 state.addLog("[指纹] 已从服务器领取 $ok 个")
