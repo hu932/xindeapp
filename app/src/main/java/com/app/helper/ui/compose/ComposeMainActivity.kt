@@ -91,6 +91,7 @@ class ComposeMainActivity : ComponentActivity() {
                 onVpnToggle = { on -> toggleVpn(on) },
                 onVpnConnect = { connectFastestVpn() },
                 onInstallVpn = { installVpnApp() },
+                onVpnRecheck = { recheckVpn() },
             )
         }
     }
@@ -378,7 +379,9 @@ class ComposeMainActivity : ComponentActivity() {
     // ---------------- VPN ----------------
 
     private fun refreshVpnState() {
-        state.vpnTargetInstalled = VpnController.isTargetInstalled(this)
+        val pkg = VpnController.detectPkg(this)
+        state.vpnTargetInstalled = pkg != null
+        state.vpnDetectLog = VpnController.lastDetectLog
         state.vpnEnabled = VpnController.isAutoEnabled(this)
         state.vpnRegion = VpnController.region(this)
         state.vpnStatus = when {
@@ -464,6 +467,19 @@ class ComposeMainActivity : ComponentActivity() {
                     this@ComposeMainActivity, "无法启动安装器", Toast.LENGTH_LONG
                 ).show()
             }
+        }
+    }
+
+
+    /** 重新检测代理 App。用户装完返回或手动点「重新检测」时调用。 */
+    private fun recheckVpn() {
+        val pkg = VpnController.detectPkg(this)
+        state.vpnTargetInstalled = pkg != null
+        state.vpnDetectLog = VpnController.lastDetectLog
+        if (pkg != null) {
+            state.addLog("[代理] 检测到 " + pkg)
+        } else {
+            state.addLog("[代理] 未检测到代理 App")
         }
     }
 

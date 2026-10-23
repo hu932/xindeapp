@@ -34,8 +34,25 @@ object VpnController {
 
     private const val TAG = "VpnCtl"
 
-    /** 目标代理 App 的包名。 */
+    /** 主目标：v2rayNG。 */
     const val TARGET_PKG = "com.v2ray.ang"
+
+    /**
+     * 可识别的代理 App。
+     * Android 11+ 的包可见性要求 manifest 的 queries 里逐个声明，
+     * 这里列出的都必须同步出现在 manifest 中，否则查不到。
+     */
+    val CANDIDATE_PKGS = listOf(
+        "com.v2ray.ang",                    // v2rayNG
+        "moe.nb4a",                         // NekoBox
+        "io.nekohasekai.sagernet",           // SagerNet
+        "com.github.kr328.clash",           // Clash Meta for Android
+    )
+
+    /** 最近一次检测的说明，供界面显示。 */
+    @Volatile
+    var lastDetectLog: String = ""
+        private set
 
     /** v2rayNG 的 Tasker 协议常量，取自其 AppConfig.kt。 */
     private const val ACTION_FIRE_SETTING = "com.twofortyfouram.locale.intent.action.FIRE_SETTING"
@@ -59,9 +76,38 @@ object VpnController {
     )
 
     /** 已安装可用代理 App。 */
-    fun isTargetInstalled(ctx: Context): Boolean = runCatching {
-        ctx.packageManager.getPackageInfo(TARGET_PKG, 0) != null
-    }.getOrDefault(false)
+    fun isTargetInstalled(ctx: Context): Boolean = detectPkg(ctx) != null
+
+    /**
+     * 返回命中的包名，没找到返回 null。
+     *
+     * Android 11+ 上 getPackageInfo 对未在 queries 里声明的包会抛
+     * NameNotFoundException。这里把每个候选的失败原因都记下来，
+     * 便于区分「真没装」和「装了但看不见」。
+     */
+    fun detectPkg(ctx: Context): String? {
+        val sb = StringBuilder()
+        for (pkg in CANDIDATE_PKGS) {
+            val ok = runCatching {
+                ctx.packageManager.getPackageInfo(pkg, 0) != null
+            }.getOrElse { e ->
+                sb.append(pkg).append(": ").append(e.javaClass.simpleName).append("\n")
+                false
+            }
+            if (ok) {
+                lastDetectLog = "命中 " + pkg
+                Log.i(TAG, lastDetectLog)
+                return pkg
+            }
+        }
+        lastDetectLog = if (sb.isEmpty()) {
+            "未找到任何代理 App"
+        } else {
+            "未找到代理 App（可能已安装但未在 manifest queries 声明）\n" + sb
+        }
+        Log.w(TAG, lastDetectLog)
+        return null
+    }
 
     /**
      * 从后台拉节点，按 region 过滤（空表示不限）。

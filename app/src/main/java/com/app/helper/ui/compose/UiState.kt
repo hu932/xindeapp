@@ -64,6 +64,7 @@ class UiState {
     var vpnTargetInstalled by mutableStateOf(false)
     var vpnDownloadPct by mutableIntStateOf(-1)   // -1 表示未在下载
     var vpnInstalling by mutableStateOf(false)
+    var vpnDetectLog by mutableStateOf("")
 
     // ---- 指纹 ----
     var fpCount by mutableIntStateOf(0)

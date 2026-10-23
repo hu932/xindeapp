@@ -21,6 +21,17 @@
 
     <queries>
         <package android:name="com.shopee.tw" />
+        <!-- 代理工具：Android 11+ 不声明就检测不到，getPackageInfo 会抛 NameNotFound -->
+        <package android:name="com.v2ray.ang" />
+        <package android:name="io.nekohasekai.sagernet" />
+        <package android:name="moe.nb4a" />
+        <package android:name="com.github.kr328.clash" />
+        <package android:name="com.nebula.v2ray" />
+        <!-- 允许查询所有能处理「安装 APK」的应用，用于拉起系统安装器 -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="application/vnd.android.package-archive" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.MAIN" />
         </intent>

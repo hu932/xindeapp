@@ -61,6 +61,7 @@ fun HelperApp(
     onVpnToggle: (Boolean) -> Unit,
     onVpnConnect: () -> Unit,
     onInstallVpn: () -> Unit,
+    onVpnRecheck: () -> Unit,
 ) {
     HelperTheme {
         Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
@@ -86,6 +87,7 @@ fun HelperApp(
                             onVpnToggle = onVpnToggle,
                             onVpnConnect = onVpnConnect,
                             onInstallVpn = onInstallVpn,
+                            onVpnRecheck = onVpnRecheck,
                         )
                         else -> EnvPage(
                             state = state,

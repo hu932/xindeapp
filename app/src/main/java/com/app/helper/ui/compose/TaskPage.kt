@@ -64,6 +64,7 @@ fun TaskPage(
     onVpnToggle: (Boolean) -> Unit,
     onVpnConnect: () -> Unit,
     onInstallVpn: () -> Unit,
+    onVpnRecheck: () -> Unit,
 ) {
     Column(
         Modifier
@@ -76,7 +77,7 @@ fun TaskPage(
         ControlCard(state, onStartAuto, onStopAuto, onSingleTask, onTestApi, onCheckUpdate)
         DelayCard(state, onSetDelay)
         PauseCard(state, onPauseEnabled, onPauseConfig)
-        VpnCard(state, onVpnToggle, onVpnConnect, onInstallVpn)
+        VpnCard(state, onVpnToggle, onVpnConnect, onInstallVpn, onVpnRecheck)
         ModeCard(state, onSilentMode, onChatMode, onChatPermission)
         LogCard(state, onClearLogs)
     }
@@ -394,6 +395,7 @@ private fun VpnCard(
     onVpnToggle: (Boolean) -> Unit,
     onVpnConnect: () -> Unit,
     onInstallVpn: () -> Unit,
+    onVpnRecheck: () -> Unit,
 ) {
     SectionCard("网络代理") {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -428,13 +430,30 @@ private fun VpnCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Button(
-                    onClick = onInstallVpn,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                    enabled = !state.vpnInstalling,
-                ) {
-                    Text(if (state.vpnInstalling) "处理中…" else "在线安装 v2rayNG")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = onInstallVpn,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        enabled = !state.vpnInstalling,
+                    ) {
+                        Text(if (state.vpnInstalling) "处理中…" else "在线安装", fontSize = 13.sp)
+                    }
+                    OutlinedButton(
+                        onClick = onVpnRecheck,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                    ) {
+                        Text("重新检测", fontSize = 13.sp)
+                    }
+                }
+                if (state.vpnDetectLog.isNotBlank()) {
+                    Text(
+                        state.vpnDetectLog,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 10.sp,
+                    )
                 }
             }
         } else {
