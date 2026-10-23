@@ -28,6 +28,7 @@ import com.app.helper.ui.login.LoginActivity
 import com.app.helper.util.DelayPrefs
 import com.app.helper.util.FingerprintManager
 import com.app.helper.util.TokenManager
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob

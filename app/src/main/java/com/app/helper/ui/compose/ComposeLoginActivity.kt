@@ -58,7 +58,12 @@ class ComposeLoginActivity : ComponentActivity() {
     private fun startModePolling() {
         lifecycleScope.launch {
             while (isActive) {
-                val inventory = try { ApiService.refreshInventoryMode() } catch (e: Exception) { }.getOrDefault(false)
+                // refreshInventoryMode 是 suspend，不能用 runCatching 包
+                val inventory = try {
+                    ApiService.refreshInventoryMode()
+                } catch (e: Exception) {
+                    false
+                }
                 modeBadge = if (inventory) ModeBadge.INVENTORY else ModeBadge.NORMAL
                 delay(3000)
             }
@@ -75,30 +80,31 @@ class ComposeLoginActivity : ComponentActivity() {
         loading = true
         errorText = ""
         lifecycleScope.launch {
-            try { ApiService.login(id) } catch (e: Exception) { }
-                .onSuccess { response ->
-                    val data = response.data
-                    if (response.isSuccess && data != null) {
-                        TokenManager.saveToken(data.token)
-                        TokenManager.saveUsername(data.accountId.ifBlank { id })
-                        TokenManager.saveGroupId(data.groupId)
-                        TokenManager.saveApiType(TokenManager.API_TYPE_1)
-                        TokenManager.saveAccountCount(
-                            if (data.api1TaskAccountCount > 0) data.api1TaskAccountCount
-                            else data.taskAccountCount
-                        )
-                        loading = false
-                        Toast.makeText(this@ComposeLoginActivity, "登录成功", Toast.LENGTH_SHORT).show()
-                        startMain()
-                        return@launch
-                    }
-                    loading = false
-                    errorText = response.msg ?: "登录失败"
-                }
-                .onFailure { e ->
-                    loading = false
-                    errorText = "网络错误：${e.message ?: "未知"}"
-                }
+            // login 是 suspend，用 try/catch 而不是 runCatching
+            val response = try {
+                ApiService.login(id)
+            } catch (e: Exception) {
+                loading = false
+                errorText = "网络错误：" + (e.message ?: "未知")
+                return@launch
+            }
+            val data = response.data
+            if (response.isSuccess && data != null) {
+                TokenManager.saveToken(data.token)
+                TokenManager.saveUsername(data.accountId.ifBlank { id })
+                TokenManager.saveGroupId(data.groupId)
+                TokenManager.saveApiType(TokenManager.API_TYPE_1)
+                TokenManager.saveAccountCount(
+                    if (data.api1TaskAccountCount > 0) data.api1TaskAccountCount
+                    else data.taskAccountCount
+                )
+                loading = false
+                Toast.makeText(this@ComposeLoginActivity, "登录成功", Toast.LENGTH_SHORT).show()
+                startMain()
+                return@launch
+            }
+            loading = false
+            errorText = response.msg ?: "登录失败"
         }
     }
 
