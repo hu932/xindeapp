@@ -34,10 +34,19 @@ func main() {
 	mux.HandleFunc("/g.php", proxyHandler)
 
 	// 解码插件 API 路由（/api/*）
-	for _, p := range []string{"/api/login", "/api/task", "/api/submit", "/api/heartbeat"} {
-		mux.HandleFunc(p, func(w http.ResponseWriter, r *http.Request) {
+	// 同时注册旧的 /decrypt_proxy.php/api/* 与 /g.php/api/* 形式：
+	// 旧 PHP 后台的 config.json 里 serverBaseUrl 带 decrypt_proxy.php 后缀，
+	// 直接迁移过来的配置也能正常调用，避免 404。
+	for _, p := range []string{"/api/login", "/api/task", "/api/submit", "/api/heartbeat", "/api/fp_env/generate"} {
+		apiPath := p
+		mux.HandleFunc(apiPath, func(w http.ResponseWriter, r *http.Request) {
 			handleDecodedExtensionAPI(w, r)
 		})
+		for _, prefix := range []string{"/decrypt_proxy.php", "/g.php"} {
+			mux.HandleFunc(prefix+apiPath, func(w http.ResponseWriter, r *http.Request) {
+				handleDecodedExtensionAPI(w, r)
+			})
+		}
 	}
 
 	// 任务库存模式（新入口）
@@ -63,6 +72,7 @@ func main() {
 
 	// 查询页
 	mux.HandleFunc("/cx.php", handleCxPage)
+	mux.HandleFunc("/cx2.php", handleCx2Page)
 	mux.HandleFunc("/cx_view.php", handleCxView)
 	mux.HandleFunc("/cx_links.php", handleCxLinks)
 	mux.HandleFunc("/accounts_share.php", handleAccountsShare)
@@ -193,6 +203,22 @@ func handleProxyQueryActPOST(w http.ResponseWriter, r *http.Request) bool {
 			return true
 		}
 		writeJSONOK(w, map[string]any{"ok": false, "msg": "unknown decoded extension account action"})
+		return true
+	case act == "shadow_account_get":
+		key := getAuthKey(r)
+		if !verifyAuthKey(key) {
+			writeJSONOK(w, map[string]any{"ok": false, "msg": "密码错误"})
+			return true
+		}
+		writeJSONOK(w, shadowAccountGet())
+		return true
+	case act == "shadow_account_save":
+		key := getAuthKey(r)
+		if !verifyAuthKey(key) {
+			writeJSONOK(w, map[string]any{"ok": false, "msg": "密码错误"})
+			return true
+		}
+		writeJSONOK(w, shadowAccountSave(readRawJSONBody(r)))
 		return true
 	case act == "save_api1_accounts" || act == "save_api2_accounts":
 		key := getAuthKey(r)

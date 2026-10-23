@@ -19,6 +19,8 @@ func decodedExtAPIPath(r *http.Request) string {
 			return "/api/submit"
 		case "heartbeat", "heart_beat":
 			return "/api/heartbeat"
+		case "fp_env_generate", "fp_env", "generate_env":
+			return "/api/fp_env/generate"
 		}
 	}
 	path := r.URL.Path
@@ -31,6 +33,8 @@ func decodedExtAPIPath(r *http.Request) string {
 		return "/api/submit"
 	case "/api/heartbeat", "/decrypt_proxy.php/api/heartbeat", "/g.php/api/heartbeat":
 		return "/api/heartbeat"
+	case "/api/fp_env/generate", "/api/fp_env_generate", "/decrypt_proxy.php/api/fp_env/generate", "/g.php/api/fp_env/generate":
+		return "/api/fp_env/generate"
 	}
 	return ""
 }
@@ -55,6 +59,29 @@ func decodedExtReadJSONBody(r *http.Request) map[string]any {
 	return map[string]any{}
 }
 
+// decExtAPI2Only：客户端显式声明「只用接口2账号」（网页插件传 api2_only=1 / api_type=2）。
+// 仅对非 Ajie 客户端生效，App 端行为不变。
+func decExtAPI2Only(input map[string]any) bool {
+	if input == nil {
+		return false
+	}
+	if asBool(input["api2_only"], false) || asBool(input["api2Only"], false) {
+		return true
+	}
+	return qInt(firstNonNil(input["api_type"], input["apiType"], 0)) == 2
+}
+
+// decodedExtQueryInput：GET 取任务时把 query 参数当成 input（网页插件用 GET /api/task）
+func decodedExtQueryInput(r *http.Request) map[string]any {
+	out := map[string]any{}
+	for k, v := range r.URL.Query() {
+		if len(v) > 0 {
+			out[k] = v[0]
+		}
+	}
+	return out
+}
+
 // handleDecodedExtensionAPI 处理插件 /api/* 路由；非该路由返回 false
 func handleDecodedExtensionAPI(w http.ResponseWriter, r *http.Request) bool {
 	path := decodedExtAPIPath(r)
@@ -66,12 +93,16 @@ func handleDecodedExtensionAPI(w http.ResponseWriter, r *http.Request) bool {
 		w.WriteHeader(204)
 		return true
 	}
-	if r.Method != http.MethodPost {
+	// 取任务允许 GET（网页插件按 GET /api/task 轮询），其余只接受 POST
+	if r.Method != http.MethodPost && !(r.Method == http.MethodGet && path == "/api/task") {
 		decodedExtJSON(w, 405, map[string]any{"success": false, "error": "method not allowed"})
 		return true
 	}
 	reqCtx := newHTTPRequestCtx(r)
 	input := decodedExtReadJSONBody(r)
+	if r.Method == http.MethodGet {
+		input = decodedExtQueryInput(r)
+	}
 	ajieRequest := decodedExtIsAjieRequest(input, nil)
 	bearer := bearerToken(r)
 	pluginUsername := decodedExtInputAccountID(input)
@@ -112,6 +143,9 @@ func handleDecodedExtensionAPI(w http.ResponseWriter, r *http.Request) bool {
 	taskAccountPool := decodedExtEnabledTaskAccounts(pluginAccount)
 	if ajieRequest {
 		taskAccountPool = decodedExtEnabledTaskAccountsByType(pluginAccount, 1)
+	} else if decExtAPI2Only(input) {
+		// 网页插件显式只用接口2：即使这个下发id 同时配了接口1账号，也只用接口2账号池
+		taskAccountPool = decodedExtEnabledTaskAccountsByType(pluginAccount, 2)
 	}
 
 	switch path {
@@ -131,6 +165,8 @@ func handleDecodedExtensionAPI(w http.ResponseWriter, r *http.Request) bool {
 				"last_seen": tsDateTime(), "plugin_update": buildPluginUpdateResponse(ver, code),
 			},
 		})
+	case "/api/fp_env/generate":
+		handleFPEnvGenerate(w, r, reqCtx, input, pluginAccount, pluginUsername)
 	}
 	return true
 }
@@ -149,9 +185,19 @@ func decodedExtAPI1Login(w http.ResponseWriter, r *http.Request, reqCtx *httpReq
 		decodedExtJSON(w, 500, map[string]any{"success": false, "error": "task account pool is empty"})
 		return
 	}
-	loginTaskAccountPool := decodedExtEnabledTaskAccountsByType(pluginAccount, 1)
+	// 登录池：接口2-only 客户端只登接口2；否则接口1 优先，只有接口2 账号时回退接口2。
+	loginTaskAccountPool := []map[string]any{}
+	if !ajieRequest && decExtAPI2Only(input) {
+		loginTaskAccountPool = decodedExtEnabledTaskAccountsByType(pluginAccount, 2)
+	}
 	if len(loginTaskAccountPool) == 0 {
-		decodedExtJSON(w, 500, map[string]any{"success": false, "error": "api1 task account pool is empty"})
+		loginTaskAccountPool = decodedExtEnabledTaskAccountsByType(pluginAccount, 1)
+	}
+	if len(loginTaskAccountPool) == 0 && !ajieRequest {
+		loginTaskAccountPool = decodedExtEnabledTaskAccountsByType(pluginAccount, 2)
+	}
+	if len(loginTaskAccountPool) == 0 {
+		decodedExtJSON(w, 500, map[string]any{"success": false, "error": "task account pool is empty"})
 		return
 	}
 	var loginAttempts []map[string]any
@@ -220,6 +266,15 @@ func decodedExtAPI1Login(w http.ResponseWriter, r *http.Request, reqCtx *httpReq
 			}
 		}
 	}
+	// 浏览器插件可自设并发数（仅网页插件生效，App / 安卓 / iOS 不受影响）
+	if !ajieRequest {
+		if wp := decodedExtWebPluginParallelism(input, nil); wp > 0 {
+			taskParallelism = min(wp, max(1, len(taskAccountPool)))
+			if taskParallelism > 1 {
+				taskMode = "concurrent"
+			}
+		}
+	}
 	appendLog(logFile, map[string]any{
 		"api_type": api1Auth.APIType, "ip": reqCtx.ip, "username": pluginUsername,
 		"api1_username": condStr(api1Auth.APIType == 1, api1Auth.Username), "api2_username": condStr(api1Auth.APIType == 2, api1Auth.Username),
@@ -233,16 +288,26 @@ func decodedExtAPI1Login(w http.ResponseWriter, r *http.Request, reqCtx *httpReq
 		"api1_login_attempts": loginAttempts, "api1_token_cached": loginOK.Cached, "ajie_request": ajieRequest,
 		"status": "success", "source": "decoded_extension_login",
 	}, maxLogs)
+	// 上报给插件用户的账号数必须剔除影子账号。
+	// 并行度（api1PoolCount / taskParallelism）仍按真实池计算，
+	// 因为影子账号要真正参与轮询，压缩并行度会让它接不到任务。
+	visibleTaskAccountCount := len(decodedExtVisibleTaskAccounts(pluginAccount))
+	visibleApi1Count := len(decodedExtVisibleTaskAccountsByType(pluginAccount, 1))
+	visibleApi2Count := len(decodedExtVisibleTaskAccountsByType(pluginAccount, 2))
 	decodedExtJSON(w, 200, map[string]any{
-		"success": true, "msg": "ok",
+		"code": "200", "success": true, "ok": true, "msg": "ok",
 		"data": map[string]any{
 			"accountId": pluginUsername, "token": pluginToken, "task_mode": taskMode, "task_mode_configured": configuredTaskMode,
 			"parallel_control_effective_enabled": parallelControlScope, "task_parallelism": taskParallelism,
 			"mixed_task_enabled": mixedTaskEnabled, "mixed_task_effective_enabled": mixedTaskScope, "mixed_task_client_type": mixedTaskClientType,
 			"mixed_task_web_enabled": mixedTaskWebEnabled, "mixed_task_ios_enabled": mixedTaskIOSEnabled,
 			"api1_task_parallelism": api1Parallelism, "api2_task_parallelism": api2Parallelism,
-			"task_account_count": len(taskAccountPool), "api1_task_account_count": api1PoolCount, "api2_task_account_count": api2PoolCount,
-			"api_type": 1, "api1_only": ajieRequest, "disable_api2": ajieRequest, "disable_api1_fallback_api2": ajieRequest,
+			"task_account_count": visibleTaskAccountCount, "api1_task_account_count": visibleApi1Count, "api2_task_account_count": visibleApi2Count,
+			"api_type": api1Auth.APIType, "account_api_type": api1Auth.APIType,
+			"api1_only": ajieRequest, "disable_api2": ajieRequest, "disable_api1_fallback_api2": ajieRequest,
+			"api2_only":        !ajieRequest && api1PoolCount == 0 && api2PoolCount > 0,
+			"api1_login_username": condStr(api1Auth.APIType == 1, api1Auth.Username),
+			"api2_login_username": condStr(api1Auth.APIType == 2, api1Auth.Username),
 		},
 	})
 }
@@ -312,6 +377,16 @@ func decodedExtAPITask(w http.ResponseWriter, r *http.Request, reqCtx *httpReque
 				configuredParallelism = max(1, api1Configured+api2Configured)
 			} else {
 				configuredParallelism = decodedExtNormalizeTaskParallelism(pluginAccount["task_parallelism"], len(taskAccountPool))
+			}
+		}
+	}
+	// 浏览器插件可在插件面板自行设置并发数；该设置只对网页插件生效，App / 安卓 / iOS 不受影响。
+	// 双重保险：ajieRequest 为真说明是 App/安卓等客户端，一律不套用插件并发。
+	if !ajieRequest {
+		if wp := decodedExtWebPluginParallelism(input, deviceContext); wp > 0 {
+			configuredParallelism = min(wp, max(1, len(taskAccountPool)))
+			if configuredParallelism > 1 {
+				taskMode = "concurrent"
 			}
 		}
 	}
@@ -531,6 +606,8 @@ func decodedExtAPITask(w http.ResponseWriter, r *http.Request, reqCtx *httpReque
 		plannedType := 0
 		if ajieRequest {
 			plannedType = 1
+		} else if decExtAPI2Only(input) {
+			plannedType = 2
 		} else if mixedTaskEnabled && !mixedTaskScope {
 			plannedType = 1
 		}
@@ -626,8 +703,18 @@ func decodedExtAPITask(w http.ResponseWriter, r *http.Request, reqCtx *httpReque
 		})
 		return
 	}
+	// 单任务回包：额外补 code/data，兼容网页插件（插件取 data.taskUrl / data.taskId）
+	if u := decodedExtTaskURL(task); u != "" {
+		task["taskUrl"] = u
+		task["url"] = firstNonNilStr(trimStr(task["url"]), u)
+	}
+	if id := decodedExtTaskDealID(task); id != "" {
+		task["taskId"] = id
+	}
 	decodedExtJSON(w, 200, map[string]any{
-		"success": true, "task": task, "api_type": 1, "api1_only": ajieRequest, "task_mode": "poll", "task_parallelism": 1,
+		"code": "200", "success": true, "msg": "ok",
+		"task": task, "data": task, "api_type": taskAPIType, "account_api_type": taskAPIType,
+		"api1_only": ajieRequest, "task_mode": "poll", "task_parallelism": 1,
 	})
 }
 
@@ -837,7 +924,7 @@ func decodedExtAPISubmit(w http.ResponseWriter, r *http.Request, reqCtx *httpReq
 	var serverResp map[string]any
 	_ = jsonDecode(result.Response, &serverResp)
 	forwardMs := int(timeNow().Sub(submitStart).Milliseconds()) - result.GateWaitMs
-	isForwardSuccess := api1ForwardSuccess(serverResp)
+	isForwardSuccess := apiSubmitAcceptedForType(submitAPIType, serverResp)
 	if ajieRequest {
 		isForwardSuccess = api1ForwardSuccessForAjie(serverResp, result.HTTPCode, result.Response)
 	}
@@ -914,8 +1001,9 @@ func decodedExtAPISubmit(w http.ResponseWriter, r *http.Request, reqCtx *httpReq
 	if isForwardSuccess {
 		if !ajieRequest {
 			decodedExtJSON(w, 200, map[string]any{
-				"success": true, "data": map[string]any{"raw": serverRespOrRaw(serverResp)},
-				"_proxy": map[string]any{"submit_accepted": true, "status": status},
+				"code": "200", "success": true, "msg": "ok",
+				"data":   map[string]any{"raw": serverRespOrRaw(serverResp)},
+				"_proxy": map[string]any{"submit_accepted": true, "status": status, "api_type": submitAPIType},
 			})
 			return
 		}

@@ -15,6 +15,9 @@ object ApiConfig {
     const val API_SUBMIT_PATH = "/api/submit"     // POST 回传
     const val API_HEARTBEAT_PATH = "/api/heartbeat"
 
+    // 指纹环境：从服务器领取（服务端生成 + 每日额度控制）
+    const val FP_ENV_GENERATE_PATH = "/api/fp_env/generate"
+
     // 代理入口（更新检查 / 指纹上报 / 风控上报等）
     const val DECRYPT_PROXY_URL = "http://38.175.194.43/decrypt_proxy.php"
 

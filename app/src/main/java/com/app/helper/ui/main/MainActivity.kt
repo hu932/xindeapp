@@ -167,36 +167,68 @@ class MainActivity : AppCompatActivity() {
         refreshFpList()
     }
 
+    /** 从服务器领取一份指纹环境（不再本地生成）。 */
     private fun generateNewFp() {
-        val fp = FingerprintManager.generateFullFp(this)
-        val name = fp.optString("name", "fp_${System.currentTimeMillis()}")
-        FingerprintManager.saveFingerprintData(this, name, fp.toString())
-        reportFpEvent("generate", name, fp.toString())
-        Toast.makeText(this, "已生成：$name", Toast.LENGTH_SHORT).show()
-        refreshFpList()
+        lifecycleScope.launch {
+            val fp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { com.app.helper.network.ApiService.fetchFingerprintEnv() }.getOrNull()
+            }
+            if (fp == null) {
+                Toast.makeText(
+                    this@MainActivity,
+                    "领取失败：请确认后台已授权生成环境且今日额度未用完",
+                    Toast.LENGTH_LONG
+                ).show()
+                return@launch
+            }
+            val name = fp.optString("name", "").ifBlank {
+                "FP-" + java.text.SimpleDateFormat(
+                    "yyyy-MM-dd HH:mm:ss", java.util.Locale.US
+                ).format(java.util.Date())
+            }
+            FingerprintManager.saveFingerprintData(this@MainActivity, name, fp.toString())
+            reportFpEvent("generate", name, fp.toString())
+            Toast.makeText(this@MainActivity, "已领取：$name", Toast.LENGTH_SHORT).show()
+            refreshFpList()
+        }
     }
 
     private fun batchGenerateFp() {
         val counts = arrayOf("5", "10", "20", "50")
         AlertDialog.Builder(this)
-            .setTitle("批量生成")
+            .setTitle("批量领取")
             .setItems(counts) { _, which ->
                 val count = counts[which].toInt()
-                Thread {
+                // fetchFingerprintEnv 是 suspend，必须走协程，不能用 Thread
+                lifecycleScope.launch {
                     val generated = mutableListOf<Pair<String, String>>()
+                    var failed = 0
                     repeat(count) { index ->
-                        val fp = FingerprintManager.generateFullFp(this)
+                        val fp = withContext(Dispatchers.IO) {
+                            runCatching { ApiService.fetchFingerprintEnv() }.getOrNull()
+                        }
+                        if (fp == null) {
+                            failed++
+                            return@repeat
+                        }
                         val name = fp.optString("name", "fp_${System.currentTimeMillis()}_$index")
-                        FingerprintManager.saveFingerprintData(this, name, fp.toString())
+                        withContext(Dispatchers.IO) {
+                            runCatching {
+                                FingerprintManager.saveFingerprintData(this@MainActivity, name, fp.toString())
+                            }
+                        }
                         generated.add(name to fp.toString())
-                        Thread.sleep(10)
+                        delay(10)
                     }
-                    runOnUiThread {
-                        generated.forEach { (name, data) -> reportFpEvent("generate", name, data) }
-                        Toast.makeText(this, "已生成 $count 个指纹", Toast.LENGTH_SHORT).show()
-                        refreshFpList()
+                    generated.forEach { (name, data) -> reportFpEvent("generate", name, data) }
+                    val msg = when {
+                        generated.isEmpty() -> "领取失败：请确认后台已授权生成环境且今日额度未用完"
+                        failed > 0 -> "已领取 ${generated.size} 个，$failed 个失败"
+                        else -> "已领取 ${generated.size} 个指纹"
                     }
-                }.start()
+                    Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
+                    refreshFpList()
+                }
             }
             .show()
     }

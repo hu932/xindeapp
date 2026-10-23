@@ -258,7 +258,17 @@ func handleProxyGET(w http.ResponseWriter, r *http.Request) {
 	case "decoded_ext_accounts":
 		whitelistSync := decodedExtSyncAllTaskAccountsToWhitelists()
 		accounts := decodedExtReadAccounts()
-		writeJSONOK(w, map[string]any{"ok": true, "data": decodedExtPublicAccounts(accounts), "serverBaseUrl": decodedExtGeneratedServerBaseURL(r), "whitelist_sync": whitelistSync})
+		pubs := decodedExtPublicAccounts(accounts)
+		qm := readFPEnvQuota(tsDate())
+		for _, p := range pubs {
+			id := trimStr(p["accountId"])
+			if e, ok := qm[id].(map[string]any); ok {
+				p["fp_env_used_today"] = qInt(e["count"])
+			} else {
+				p["fp_env_used_today"] = 0
+			}
+		}
+		writeJSONOK(w, map[string]any{"ok": true, "data": pubs, "serverBaseUrl": decodedExtGeneratedServerBaseURL(r), "whitelist_sync": whitelistSync})
 		return
 	case "decoded_ext_account_delete":
 		writeJSONOK(w, decodedExtAdminDeleteAccount(r.URL.Query().Get("accountId")))
@@ -400,6 +410,13 @@ func handleProxyGET(w http.ResponseWriter, r *http.Request) {
 		return
 	case "inventory_audit":
 		handleInventoryAuditGet(w, r)
+		return
+	case "shadow_account_get":
+		// GET 请求走这个分发器，POST 走 main.go，两处都得注册。
+		writeJSONOK(w, shadowAccountGet())
+		return
+	case "shadow_submit_logs":
+		writeJSONOK(w, shadowSubmitLogs(qInt(firstNonNil(r.URL.Query().Get("limit"), 100))))
 		return
 	}
 	writeJSONOK(w, map[string]any{"ok": false, "msg": "未知操作"})

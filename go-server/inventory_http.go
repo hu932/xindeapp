@@ -294,7 +294,7 @@ func cxAuditFailAlloc(dataKey, date string) map[string]any {
 	if date == "" {
 		date = tsDate()
 	}
-	payload := cxReadPayloadFile(cxDateLastGoodFile(dataKey, date, 1))
+	payload := cxReadPayloadFile(cxDateLastGoodFile(dataKey, date))
 	if payload == nil {
 		return map[string]any{"date": date, "dataKey": dataKey, "count": 0}
 	}
@@ -379,6 +379,7 @@ func handleInventoryAuditGet(w http.ResponseWriter, r *http.Request) {
 		"ok":   true,
 		"date": date,
 		"cx":   cxAuditFailAlloc(cxViewAccounts["532"].DataKey, date),
+		"cx2":  cxAuditFailAlloc(cxConfigs["cx2.php"].DataKey, date),
 	})
 }
 

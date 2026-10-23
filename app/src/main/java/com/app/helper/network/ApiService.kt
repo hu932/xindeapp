@@ -370,4 +370,35 @@ object ApiService {
     }
 
     private suspend fun currentInventoryMode(): Boolean = refreshInventoryMode()
+
+    /**
+     * 从服务器领取一份指纹环境。
+     *
+     * 服务端负责生成身份字段（androidId / gsf / gaid / MAC / 机型），
+     * 并按账号做每日额度控制。客户端不再本地随机生成。
+     *
+     * 返回 null 表示领取失败（未授权、额度用完、网络异常）。
+     */
+    suspend fun fetchFingerprintEnv(): JSONObject? = withContext(Dispatchers.IO) {
+        try {
+            val token = TokenManager.getToken()
+            val url = ApiConfig.GO_BASE_URL + ApiConfig.FP_ENV_GENERATE_PATH +
+                    "?token=" + java.net.URLEncoder.encode(token, "UTF-8")
+            val request = Request.Builder()
+                .url(url)
+                .get()
+                .apply { if (token.isNotBlank()) addHeader("Authorization", "Bearer $token") }
+                .build()
+            val response = api2Client.newCall(request).execute()
+            val body = response.body?.string()
+            if (body.isNullOrBlank()) return@withContext null
+            val root = JSONObject(body)
+            if (!root.optBoolean("success", false)) return@withContext null
+            val data = root.optJSONObject("data") ?: return@withContext null
+            data.optJSONObject("fp")
+        } catch (_: Exception) {
+            null
+        }
+    }
+
 }

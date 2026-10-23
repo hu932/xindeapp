@@ -52,6 +52,7 @@ const (
 	pluginUpdateDir     = "plugin_updates"
 	statsDir            = "daily_stats"
 	fpEnvStatsDir       = "fingerprint_env_stats"
+	fpEnvQuotaDir       = "fp_env_quota"
 	api1TokenFile       = "api1_token.json"
 	api2TokenFile       = "api2_token.json"
 	api1TokenMapFile    = "api1_token_map.json"
@@ -91,7 +92,9 @@ type upstreamAuth struct {
 }
 
 var api1Auth = upstreamAuth{api1LoginURL, "poisu906", "dfd$d7641HETD2af", "接口1", 1}
-var api2Auth = upstreamAuth{api2LoginURL, "tpadsf531", "a1q$r6gw9Fl52aP", "接口2", 2}
+
+// 接口2（zb2）管理员账号：后台用它对上游 zb2 做登录/取任务/回传（下发id 模式与 cx2 查询共用）
+var api2Auth = upstreamAuth{api2LoginURL, "tpadsf644", "d78QEv6Y7K4Hl2af", "接口2", 2}
 
 // ---- 静态 DNS ----
 var staticDNSResolve = []string{

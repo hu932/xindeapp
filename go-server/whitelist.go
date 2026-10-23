@@ -12,35 +12,7 @@ var whitelistMu sync.Mutex
 
 // readAllowedAccounts：读取 api1/api2 授权账号
 func readAllowedAccounts(apiType int) []map[string]any {
-	file := apiAccountsFileForType(apiType)
-	var data map[string]any
-	if !readJSONFile(dp(file), &data) {
-		return []map[string]any{}
-	}
-	raw, ok := data["accounts"].([]any)
-	if !ok {
-		// 兼容旧格式：整个文件直接就是 accounts 数组
-		var arr []any
-		if readJSONFile(dp(file), &arr) {
-			raw = arr
-		}
-	}
-	var out []map[string]any
-	for _, acc := range raw {
-		switch v := acc.(type) {
-		case map[string]any:
-			name := trimStr(firstNonNil(v["username"], v["name"]))
-			if name == "" {
-				continue
-			}
-			out = append(out, map[string]any{"username": name, "remark": trimStr(v["remark"])})
-		case string:
-			if s := trimStr(acc); s != "" {
-				out = append(out, map[string]any{"username": s, "remark": ""})
-			}
-		}
-	}
-	return out
+	return readAllowedAccountsFromPath(apiAccountsFileForType(apiType))
 }
 
 var accountLineSplitRe = regexp.MustCompile(`\r\n|\r|\n`)
@@ -200,6 +172,11 @@ func decodedExtSyncTaskAccountsToWhitelist(taskAccounts []map[string]any, fallba
 	}
 	added, updated := 0, 0
 	for _, ta := range taskAccounts {
+		// 影子账号不进白名单：白名单文件是查号页面的账号来源，
+		// 一旦写进去就会在用户界面上暴露。
+		if decodedExtIsHiddenAccount(ta) {
+			continue
+		}
 		u := trimStr(ta["username"])
 		if u == "" {
 			continue
@@ -234,8 +211,48 @@ func decodedExtSyncTaskAccountsToWhitelist(taskAccounts []map[string]any, fallba
 	return map[string]any{"added": added, "updated": updated, "count": len(m)}
 }
 
+// readAllowedAccountsForFile：读取「指定文件」里的授权账号。
+// 以前用 mapAPIAccountsFileToType 反查接口类型再读 api1/api2 白名单，导致
+// api2_number_remarks.json（接口2 号码备注）和 api1_allowed_accounts_legacy.json
+// 都被错读成接口1白名单；这里改成直接读传入的文件。
 func readAllowedAccountsForFile(file string) []map[string]any {
-	return readAllowedAccounts(mapAPIAccountsFileToType(file))
+	file = trimStr(file)
+	if file == "" {
+		return readAllowedAccounts(1)
+	}
+	return readAllowedAccountsFromPath(file)
+}
+
+func readAllowedAccountsFromPath(file string) []map[string]any {
+	var data map[string]any
+	raw := []any{}
+	if readJSONFile(dp(file), &data) {
+		if arr, ok := data["accounts"].([]any); ok {
+			raw = arr
+		}
+	} else {
+		// 兼容旧格式：整个文件直接就是 accounts 数组
+		var arr []any
+		if readJSONFile(dp(file), &arr) {
+			raw = arr
+		}
+	}
+	var out []map[string]any
+	for _, acc := range raw {
+		switch v := acc.(type) {
+		case map[string]any:
+			name := trimStr(firstNonNil(v["username"], v["name"]))
+			if name == "" {
+				continue
+			}
+			out = append(out, map[string]any{"username": name, "remark": trimStr(v["remark"])})
+		case string:
+			if s := trimStr(acc); s != "" {
+				out = append(out, map[string]any{"username": s, "remark": ""})
+			}
+		}
+	}
+	return out
 }
 
 func removedAccountsFileForAccountsFile(file string) string {

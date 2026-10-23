@@ -224,9 +224,20 @@ username|password              # 全局池：所有下发id共享，轮询
 
 后台管理接口：`?act=inventory_config`（读）、`?act=inventory_save`（写，POST）、`?act=inventory_sub_table`（读子账号表）、`?act=inventory_sub_table_save`（写，POST）、`?act=inventory_status`（运行状态 + 当日统计）。
 
+## 接口2（zb2）
+
+接口2 已接入（管理员账号 `tpadsf644`，见 `config.go` 的 `api2Auth`），可用于：
+
+- `GET /api/task`、`POST /api/login`、`POST /api/submit`：下发id 模式，后台自动读取该下发id 的 `api2_accounts` 账号池，逐个登录上游 zb2 轮询取任务并回传（结果自动做 null→"" 清洗）。
+- 老客户端透传：`POST /decrypt_proxy.php?act=api2_login|api2_take|api2_submit`。
+- `GET /cx2.php`：接口2 查询页，功能与 `cx.php` 完全一致（日期/统计/备注分组绩效/金额/自动刷新/`?format=json`/`?act=clear_cache`），只是固定查接口2，使用独立缓存 DataKey。
+- `GET /cx_cron.php`：同时刷新 cx.php 与 cx2.php。
+
+> App（ajie 客户端）目前仍只取接口1；接口2 面向网页插件/网页端（请求不带 `client=ajie-*` / `device_label=ajie` 标识）。
+
 ## 兼容性说明
 
 - 所有 JSON 数据文件、日志 `decrypt_proxy_logs.jsonl`、`accounts_share_data.php` 格式与 PHP 完全一致，可直接迁移。
 - 解密方式（AES-128-ECB + PKCS7）、上游接口地址、token 缓存、设备控制、子账号、插件账号、备注链接、平行控制页全部保留。
 - 任务队列/租约（原 PHP 存 SQLite，TTL 10~30 分钟）改为内存 + JSON 持久化，属瞬时状态，不影响任何用户数据。
-- 接口2（zb2）按原样保持“已停用”返回。
+- 接口2（zb2）已启用：三个 `api2_*` handler、`/api/*` 下发id 取任务/回传、`/cx2.php` 查询均已接线。

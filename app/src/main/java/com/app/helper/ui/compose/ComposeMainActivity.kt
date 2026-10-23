@@ -187,26 +187,45 @@ class ComposeMainActivity : ComponentActivity() {
         }
     }
 
-    /** 与旧版一致：generateFullFp → saveFingerprintData → 上报。 */
+    /**
+     * 从服务器领取指纹环境并保存。
+     *
+     * 服务端 /api/fp_env/generate 负责生成身份字段（androidId / gsf / gaid /
+     * MAC / 机型）并对每个账号做每日额度控制。客户端不再本地随机生成，
+     * 这样发号可以统一管理和限流。
+     */
     private fun generateFp(count: Int) {
         lifecycleScope.launch {
-            val names = withContext(Dispatchers.IO) {
-                val out = mutableListOf<String>()
-                repeat(count) { idx ->
+            var ok = 0
+            var failReason = ""
+            repeat(count) { idx ->
+                val fp = withContext(Dispatchers.IO) {
+                    runCatching { ApiService.fetchFingerprintEnv() }.getOrNull()
+                }
+                if (fp == null) {
+                    failReason = if (failReason.isBlank()) "服务器未返回" else failReason
+                    return@repeat
+                }
+                val name = fp.optString("name", "").ifBlank {
+                    "FP-" + java.text.SimpleDateFormat(
+                        "yyyy-MM-dd HH:mm:ss", java.util.Locale.US
+                    ).format(java.util.Date())
+                }
+                withContext(Dispatchers.IO) {
                     runCatching {
-                        val fp = FingerprintManager.generateFullFp(this@ComposeMainActivity)
-                        val name = fp.optString("name", "fp_${System.currentTimeMillis()}_$idx")
                         FingerprintManager.saveFingerprintData(
                             this@ComposeMainActivity, name, fp.toString()
                         )
-                        out.add(name)
-                        runCatching { ApiService.reportFingerprintEvent("generate", name, fp.toString()) }
-                        Thread.sleep(10)
                     }
                 }
-                out
+                runCatching { ApiService.reportFingerprintEvent("generate", name, fp.toString()) }
+                ok++
             }
-            state.addLog("[指纹] 生成 ${names.size} 个")
+            if (ok > 0) {
+                state.addLog("[指纹] 已从服务器领取 $ok 个")
+            } else {
+                state.addLog("[指纹] 领取失败（$failReason）——请确认后台已授权生成环境且今日额度未用完")
+            }
             refreshFingerprints()
         }
     }

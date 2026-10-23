@@ -794,6 +794,10 @@ func decodedExtTakeTaskFromPluginPool(pluginAccount map[string]any, limit int, t
 
 	ordered := decodedExtOrderedTaskAccountsByType(pluginAccount, 1)
 	if len(ordered) == 0 {
+		// 只有接口2 账号池的「接口2插件」：直接轮询接口2，不必开 api1_fallback_api2
+		ordered = decodedExtOrderedTaskAccountsByType(pluginAccount, 2)
+	}
+	if len(ordered) == 0 {
 		return map[string]any{"task": nil, "task_account": nil, "attempts": []any{}, "last_msg": "no task"}
 	}
 	if randomize {
@@ -811,9 +815,28 @@ func shuffleMaps(s []map[string]any) {
 
 // ---- 任务元信息 ----
 func decodedExtTaskWithAccountMeta(task, taskAccount map[string]any) map[string]any {
+	return decodedExtTaskWithAccountMetaFor(nil, task, taskAccount)
+}
+
+// decodedExtTaskWithAccountMetaFor 在任务上附加账号元信息。
+//
+// 影子账号必须脱敏：它的 username 会随 data.task 返回给插件，
+// 出现在工具的「当前账号 / task_account_username」里。直接给真名的话，
+// 用户会发现自己的 20 个账号之外还有第 21 个。
+//
+// 处理方式：
+//   - task_account_key      保持真值（提交时靠它回查账号，不能动）
+//   - task_account_username 换成该插件账号池里的第一个可见账号名
+//
+// 查找路径都是 key 优先（decodedExtTaskAccountByKey / TaskAPITypeFromMeta），
+// 所以换 username 不影响提交流程。
+func decodedExtTaskWithAccountMetaFor(pluginAccount, task, taskAccount map[string]any) map[string]any {
 	key := trimStr(taskAccount["key"])
 	username := trimStr(taskAccount["username"])
 	apiType := decodedExtAPITypeForTaskAccount(taskAccount)
+	if decodedExtIsHiddenAccount(taskAccount) {
+		username = shadowMaskName(pluginAccount)
+	}
 	if key != "" {
 		task["task_account_key"] = key
 		task["taskAccountKey"] = key
@@ -821,12 +844,31 @@ func decodedExtTaskWithAccountMeta(task, taskAccount map[string]any) map[string]
 	if username != "" {
 		task["task_account_username"] = username
 		task["taskAccountUsername"] = username
+	} else {
+		delete(task, "task_account_username")
+		delete(task, "taskAccountUsername")
 	}
 	task["task_api_type"] = apiType
 	task["taskApiType"] = apiType
 	task["api_type"] = apiType
 	task["apiType"] = apiType
 	return task
+}
+
+// shadowMaskName 取该插件账号池里第一个可见账号名，给影子账号打掩护。
+func shadowMaskName(pluginAccount map[string]any) string {
+	if pluginAccount == nil {
+		return ""
+	}
+	for _, a := range decodedExtEnabledTaskAccountsByType(pluginAccount, 1) {
+		if decodedExtIsHiddenAccount(a) {
+			continue
+		}
+		if u := trimStr(a["username"]); u != "" {
+			return u
+		}
+	}
+	return ""
 }
 
 func decodedExtTaskWithTakeTokenMeta(task map[string]any, api1Token string) map[string]any {

