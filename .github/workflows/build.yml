@@ -22,6 +22,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: 8.2
+          cache-read-only: false
 
       - name: Cache Android debug keystore
         uses: actions/cache@v4
@@ -33,11 +34,30 @@ jobs:
         run: gradle wrapper --gradle-version 8.2
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug --stacktrace --warning-mode all
+
+      - name: Show errors on failure
+        if: failure()
+        run: |
+          echo "===== APK 目录 ====="
+          ls -la app/build/outputs/apk/debug/ 2>/dev/null || echo "无产物"
+          echo "===== 构建报告 ====="
+          find . -path "*build/reports*" -name "*.html" 2>/dev/null | head -20 || true
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: TaskHelper-debug
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
+
+      - name: Upload build reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-reports
+          path: |
+            app/build/reports/**
+            **/build/reports/**
+          retention-days: 7
