@@ -74,7 +74,7 @@
         <service
             android:name=".service.ChatAccessibilityService"
             android:exported="false"
-            android:label="Ajie 鑱婁竴鑱婂姪鎵?
+            android:label="Ajie 聊一聊助手"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
