@@ -58,6 +58,8 @@ fun HelperApp(
     onGenerateFp: () -> Unit,
     onBatchGenerateFp: () -> Unit,
     onFpClick: (FingerprintManagerFp) -> Unit,
+    onVpnToggle: (Boolean) -> Unit,
+    onVpnConnect: () -> Unit,
 ) {
     HelperTheme {
         Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
@@ -80,6 +82,8 @@ fun HelperApp(
                             onChatPermission = onChatPermission,
                             onClearLogs = onClearLogs,
                             onCheckUpdate = onCheckUpdate,
+                            onVpnToggle = onVpnToggle,
+                            onVpnConnect = onVpnConnect,
                         )
                         else -> EnvPage(
                             state = state,

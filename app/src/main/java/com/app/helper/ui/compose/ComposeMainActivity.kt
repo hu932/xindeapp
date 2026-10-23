@@ -22,6 +22,8 @@ import com.app.helper.service.TaskService
 import com.app.helper.util.DelayPrefs
 import com.app.helper.util.FingerprintManager
 import com.app.helper.util.TokenManager
+import com.app.helper.vpn.VpnController
+import com.app.helper.vpn.VpnGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -53,6 +55,7 @@ class ComposeMainActivity : ComponentActivity() {
 
         requestPermissions()
         loadPrefs()
+        refreshVpnState()
         registerReceivers()
         refreshFingerprints()
 
@@ -81,6 +84,8 @@ class ComposeMainActivity : ComponentActivity() {
                 onGenerateFp = { generateFp(1) },
                 onBatchGenerateFp = { generateFp(5) },
                 onFpClick = { fp -> activateFp(fp.name) },
+                onVpnToggle = { on -> toggleVpn(on) },
+                onVpnConnect = { connectFastestVpn() },
             )
         }
     }
@@ -88,11 +93,13 @@ class ComposeMainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         state.chatPermissionOk = isAccessibilityEnabled()
+        refreshVpnState()
         refreshFingerprints()
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        VpnGuard.stop()
         logReceiver?.let { runCatching { unregisterReceiver(it) } }
         statsReceiver?.let { runCatching { unregisterReceiver(it) } }
     }
@@ -362,4 +369,54 @@ class ComposeMainActivity : ComponentActivity() {
             registerReceiver(statsReceiver, IntentFilter("com.app.helper.STATS_ACTION"), flag)
         }
     }
+
+    // ---------------- VPN ----------------
+
+    private fun refreshVpnState() {
+        state.vpnTargetInstalled = VpnController.isTargetInstalled(this)
+        state.vpnEnabled = VpnController.isAutoEnabled(this)
+        state.vpnRegion = VpnController.region(this)
+        state.vpnStatus = when {
+            !state.vpnTargetInstalled -> "未检测到 v2rayNG"
+            VpnGuard.isRunning() -> VpnGuard.lastMessage.ifBlank { "守护运行中" }
+            else -> "已停止"
+        }
+    }
+
+    private fun toggleVpn(on: Boolean) {
+        if (!state.vpnTargetInstalled) {
+            state.addLog("[代理] 请先安装 v2rayNG")
+            VpnController.openInstallPage(this)
+            return
+        }
+        VpnController.setAutoEnabled(this, on)
+        state.vpnEnabled = on
+        if (on) {
+            state.vpnStatus = "正在连接..."
+            state.addLog("[代理] 启动自动切换")
+            VpnGuard.start(this)
+            connectFastestVpn()
+        } else {
+            VpnGuard.stop()
+            VpnController.setEnabled(this, false)
+            state.vpnStatus = "已停止"
+            state.addLog("[代理] 已停止")
+        }
+    }
+
+    private fun connectFastestVpn() {
+        if (!state.vpnTargetInstalled) {
+            state.addLog("[代理] 请先安装 v2rayNG")
+            return
+        }
+        state.vpnStatus = "正在测速..."
+        VpnGuard.connectNow(this) { ok, msg ->
+            state.vpnStatus = msg
+            state.addLog("[代理] " + msg)
+            if (!ok && msg.contains("v2rayNG")) {
+                VpnController.openInstallPage(this)
+            }
+        }
+    }
+
 }

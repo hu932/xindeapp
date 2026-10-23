@@ -57,6 +57,12 @@ class UiState {
 
     fun clearLogs() = logs.clear()
 
+    // ---- VPN ----
+    var vpnEnabled by mutableStateOf(false)
+    var vpnStatus by mutableStateOf("未启用")
+    var vpnRegion by mutableStateOf("")
+    var vpnTargetInstalled by mutableStateOf(false)
+
     // ---- 指纹 ----
     var fpCount by mutableIntStateOf(0)
     val fpList = mutableStateListOf<FingerprintManager.FpFileInfo>()

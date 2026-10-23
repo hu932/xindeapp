@@ -61,6 +61,8 @@ fun TaskPage(
     onChatPermission: () -> Unit,
     onClearLogs: () -> Unit,
     onCheckUpdate: () -> Unit,
+    onVpnToggle: (Boolean) -> Unit,
+    onVpnConnect: () -> Unit,
 ) {
     Column(
         Modifier
@@ -73,6 +75,7 @@ fun TaskPage(
         ControlCard(state, onStartAuto, onStopAuto, onSingleTask, onTestApi, onCheckUpdate)
         DelayCard(state, onSetDelay)
         PauseCard(state, onPauseEnabled, onPauseConfig)
+        VpnCard(state, onVpnToggle, onVpnConnect)
         ModeCard(state, onSilentMode, onChatMode, onChatPermission)
         LogCard(state, onClearLogs)
     }
@@ -379,6 +382,57 @@ private fun LogCard(state: UiState, onClearLogs: () -> Unit) {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VpnCard(
+    state: UiState,
+    onVpnToggle: (Boolean) -> Unit,
+    onVpnConnect: () -> Unit,
+) {
+    SectionCard("网络代理") {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("自动代理", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    state.vpnStatus,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = when {
+                        !state.vpnTargetInstalled -> MaterialTheme.colorScheme.error
+                        state.vpnEnabled -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+            Switch(
+                checked = state.vpnEnabled,
+                onCheckedChange = onVpnToggle,
+                enabled = state.vpnTargetInstalled,
+            )
+        }
+        if (!state.vpnTargetInstalled) {
+            Text(
+                "需要先安装 v2rayNG 才能自动切换节点",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = onVpnConnect,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(10.dp),
+                ) { Text("连接最快节点") }
+            }
+            if (state.vpnRegion.isNotBlank()) {
+                Text(
+                    "地区筛选：${state.vpnRegion}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
