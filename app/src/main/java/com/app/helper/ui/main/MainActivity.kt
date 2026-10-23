@@ -171,7 +171,11 @@ class MainActivity : AppCompatActivity() {
     private fun generateNewFp() {
         lifecycleScope.launch {
             val fp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { com.app.helper.network.ApiService.fetchFingerprintEnv() }.getOrNull()
+                try {
+                    com.app.helper.network.ApiService.fetchFingerprintEnv()
+                } catch (e: Exception) {
+                    null
+                }
             }
             if (fp == null) {
                 Toast.makeText(
@@ -205,7 +209,7 @@ class MainActivity : AppCompatActivity() {
                     var failed = 0
                     repeat(count) { index ->
                         val fp = withContext(Dispatchers.IO) {
-                            runCatching { ApiService.fetchFingerprintEnv() }.getOrNull()
+                            try { ApiService.fetchFingerprintEnv() } catch (e: Exception) { null }
                         }
                         if (fp == null) {
                             failed++

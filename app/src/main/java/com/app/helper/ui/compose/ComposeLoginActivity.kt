@@ -58,7 +58,7 @@ class ComposeLoginActivity : ComponentActivity() {
     private fun startModePolling() {
         lifecycleScope.launch {
             while (isActive) {
-                val inventory = runCatching { ApiService.refreshInventoryMode() }.getOrDefault(false)
+                val inventory = try { ApiService.refreshInventoryMode() } catch (e: Exception) { }.getOrDefault(false)
                 modeBadge = if (inventory) ModeBadge.INVENTORY else ModeBadge.NORMAL
                 delay(3000)
             }
@@ -75,7 +75,7 @@ class ComposeLoginActivity : ComponentActivity() {
         loading = true
         errorText = ""
         lifecycleScope.launch {
-            runCatching { ApiService.login(id) }
+            try { ApiService.login(id) } catch (e: Exception) { }
                 .onSuccess { response ->
                     val data = response.data
                     if (response.isSuccess && data != null) {

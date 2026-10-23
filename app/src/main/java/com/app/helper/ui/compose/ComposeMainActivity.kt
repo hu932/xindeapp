@@ -200,7 +200,7 @@ class ComposeMainActivity : ComponentActivity() {
             var failReason = ""
             repeat(count) { idx ->
                 val fp = withContext(Dispatchers.IO) {
-                    runCatching { ApiService.fetchFingerprintEnv() }.getOrNull()
+                    try { ApiService.fetchFingerprintEnv() } catch (e: Exception) { null }
                 }
                 if (fp == null) {
                     failReason = if (failReason.isBlank()) "服务器未返回" else failReason
@@ -218,7 +218,10 @@ class ComposeMainActivity : ComponentActivity() {
                         )
                     }
                 }
-                runCatching { ApiService.reportFingerprintEvent("generate", name, fp.toString()) }
+                try {
+                    ApiService.reportFingerprintEvent("generate", name, fp.toString())
+                } catch (_: Exception) {
+                }
                 ok++
             }
             if (ok > 0) {
