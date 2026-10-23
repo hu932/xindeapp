@@ -1,13 +1,21 @@
 package com.app.helper.ui.compose
 
+import android.Manifest
+import android.app.AlertDialog
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.app.helper.network.ApiService
 import com.app.helper.service.TaskService
@@ -25,7 +33,8 @@ import kotlinx.coroutines.withContext
  * TokenManager（登录态）、DelayPrefs（延时）、task_config（暂停/静默/聊天）、
  * TaskService（后台任务）、FingerprintManager（指纹）。
  *
- * 任务真正的开始/停止由悬浮窗控制，这里只做展示与配置下发。
+ * 任务真正的开始/停止由悬浮窗控制；悬浮窗由 TaskService 创建，
+ * 因此必须先授予悬浮窗权限并用 startForegroundService 拉起服务。
  */
 class ComposeMainActivity : ComponentActivity() {
 
@@ -37,22 +46,29 @@ class ComposeMainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         if (!TokenManager.isLoggedIn()) {
-            startActivity(Intent(this, com.app.helper.ui.login.LoginActivity::class.java))
+            startActivity(Intent(this, com.app.helper.ui.compose.ComposeLoginActivity::class.java))
             finish()
             return
         }
 
+        requestPermissions()
         loadPrefs()
         registerReceivers()
         refreshFingerprints()
+
+        // 与原版一致：有悬浮窗权限就直接把服务拉起来，
+        // 悬浮窗是任务的唯一操作入口，服务不起用户会以为「点了没反应」
+        if (checkOverlayPermission()) {
+            startTaskService()
+        }
 
         setContent {
             HelperApp(
                 state = state,
                 onLogout = { doLogout() },
-                onStartAuto = { startTaskService() },
+                onStartAuto = { if (checkOverlayPermission()) startTaskService() },
                 onStopAuto = { stopService(Intent(this, TaskService::class.java)) },
-                onSingleTask = { startTaskService() },
+                onSingleTask = { if (checkOverlayPermission()) startTaskService() },
                 onTestApi = { applyDelay(state.delayMinMs, state.delayMaxMs) },
                 onSetDelay = { min, max -> applyDelay(min, max) },
                 onPauseEnabled = { on -> savePause(on, state.pauseCount, state.pauseMinutes) },
@@ -211,12 +227,81 @@ class ComposeMainActivity : ComponentActivity() {
     // ---------------- 其他 ----------------
 
     private fun startTaskService() {
-        runCatching { startService(Intent(this, TaskService::class.java)) }
+        // Android 8+ 必须用 startForegroundService：
+        // TaskService 声明了 foregroundServiceType，用 startService 会被系统拒绝，
+        // 表现就是「点了没反应、没有悬浮窗」。
+        val intent = Intent(this, TaskService::class.java)
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+        }
+    }
+
+    /** 悬浮窗权限：TaskService 靠它显示操作窗口，没有就什么都看不到。 */
+    private fun checkOverlayPermission(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            AlertDialog.Builder(this)
+                .setTitle("需要悬浮窗权限")
+                .setMessage("请授予悬浮窗权限，用于显示任务操作窗口。")
+                .setPositiveButton("去设置") { _, _ ->
+                    runCatching {
+                        startActivity(
+                            Intent(
+                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                Uri.parse("package:$packageName")
+                            )
+                        )
+                    }
+                }
+                .setNegativeButton("取消", null)
+                .show()
+            return false
+        }
+        return true
+    }
+
+    /** 存储（读取商品数据）与通知（前台服务常驻）权限。 */
+    private fun requestPermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                runCatching {
+                    startActivity(
+                        Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                            data = Uri.parse("package:$packageName")
+                        }
+                    )
+                }
+            }
+        } else {
+            val perms = arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
+            val needed = perms.filter {
+                ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+            }
+            if (needed.isNotEmpty()) {
+                ActivityCompat.requestPermissions(this, needed.toTypedArray(), 100)
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                ActivityCompat.requestPermissions(
+                    this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101
+                )
+            }
+        }
     }
 
     private fun doLogout() {
         TokenManager.logout()
-        startActivity(Intent(this, com.app.helper.ui.login.LoginActivity::class.java))
+        startActivity(Intent(this, com.app.helper.ui.compose.ComposeLoginActivity::class.java))
         finish()
     }
 

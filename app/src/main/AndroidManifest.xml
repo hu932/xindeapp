@@ -46,8 +46,9 @@
         android:usesCleartextTraffic="true"
         tools:targetApi="31">
 
+        <!-- Compose 版登录页（启动入口） -->
         <activity
-            android:name=".ui.login.LoginActivity"
+            android:name=".ui.compose.ComposeLoginActivity"
             android:exported="true"
             android:theme="@style/Theme.TaskHelper">
             <intent-filter>
@@ -55,6 +56,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 旧版登录页：保留但不再是入口 -->
+        <activity
+            android:name=".ui.login.LoginActivity"
+            android:exported="false"
+            android:theme="@style/Theme.TaskHelper" />
 
         <activity
             android:name=".ui.main.MainActivity"
