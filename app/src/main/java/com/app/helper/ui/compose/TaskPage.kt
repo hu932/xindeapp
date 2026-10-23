@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,9 +14,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -239,14 +237,14 @@ private fun DelayCard(state: UiState, onSetDelay: (Long, Long) -> Unit) {
                         onClick = { onSetDelay(min, max) },
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(9.dp),
-                        contentPadding = ButtonDefaults.ContentPadding,
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
                     ) { Text(label, fontSize = 12.sp, maxLines = 1) }
                 } else {
                     OutlinedButton(
                         onClick = { onSetDelay(min, max) },
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(9.dp),
-                        contentPadding = ButtonDefaults.ContentPadding,
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
                     ) { Text(label, fontSize = 12.sp, maxLines = 1) }
                 }
             }
@@ -332,10 +330,6 @@ private fun ModeCard(
 
 @Composable
 private fun LogCard(state: UiState, onClearLogs: () -> Unit) {
-    val listState = rememberLazyListState()
-    LaunchedEffect(state.logs.size) {
-        if (state.logs.isNotEmpty()) listState.animateScrollToItem(state.logs.size - 1)
-    }
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
@@ -372,8 +366,8 @@ private fun LogCard(state: UiState, onClearLogs: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    LazyColumn(state = listState) {
-                        items(state.logs) { line ->
+                    Column {
+                        state.logs.forEach { line ->
                             Text(
                                 line,
                                 style = MaterialTheme.typography.bodySmall,
