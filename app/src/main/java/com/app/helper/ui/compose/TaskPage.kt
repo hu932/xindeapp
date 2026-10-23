@@ -63,6 +63,7 @@ fun TaskPage(
     onCheckUpdate: () -> Unit,
     onVpnToggle: (Boolean) -> Unit,
     onVpnConnect: () -> Unit,
+    onInstallVpn: () -> Unit,
 ) {
     Column(
         Modifier
@@ -75,7 +76,7 @@ fun TaskPage(
         ControlCard(state, onStartAuto, onStopAuto, onSingleTask, onTestApi, onCheckUpdate)
         DelayCard(state, onSetDelay)
         PauseCard(state, onPauseEnabled, onPauseConfig)
-        VpnCard(state, onVpnToggle, onVpnConnect)
+        VpnCard(state, onVpnToggle, onVpnConnect, onInstallVpn)
         ModeCard(state, onSilentMode, onChatMode, onChatPermission)
         LogCard(state, onClearLogs)
     }
@@ -392,6 +393,7 @@ private fun VpnCard(
     state: UiState,
     onVpnToggle: (Boolean) -> Unit,
     onVpnConnect: () -> Unit,
+    onInstallVpn: () -> Unit,
 ) {
     SectionCard("网络代理") {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -414,11 +416,27 @@ private fun VpnCard(
             )
         }
         if (!state.vpnTargetInstalled) {
-            Text(
-                "需要先安装 v2rayNG 才能自动切换节点",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.error,
-            )
+            if (state.vpnDownloadPct >= 0) {
+                Text(
+                    "正在下载 v2rayNG… " + state.vpnDownloadPct + "%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            } else {
+                Text(
+                    "需要 v2rayNG 才能自动切换节点",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Button(
+                    onClick = onInstallVpn,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    enabled = !state.vpnInstalling,
+                ) {
+                    Text(if (state.vpnInstalling) "处理中…" else "在线安装 v2rayNG")
+                }
+            }
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(

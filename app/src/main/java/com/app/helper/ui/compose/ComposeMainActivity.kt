@@ -22,6 +22,7 @@ import com.app.helper.service.TaskService
 import com.app.helper.util.DelayPrefs
 import com.app.helper.util.FingerprintManager
 import com.app.helper.util.TokenManager
+import com.app.helper.vpn.ApkInstaller
 import com.app.helper.vpn.VpnController
 import com.app.helper.vpn.VpnGuard
 import kotlinx.coroutines.Dispatchers
@@ -86,6 +87,7 @@ class ComposeMainActivity : ComponentActivity() {
                 onFpClick = { fp -> activateFp(fp.name) },
                 onVpnToggle = { on -> toggleVpn(on) },
                 onVpnConnect = { connectFastestVpn() },
+                onInstallVpn = { installVpnApp() },
             )
         }
     }
@@ -415,6 +417,49 @@ class ComposeMainActivity : ComponentActivity() {
             state.addLog("[代理] " + msg)
             if (!ok && msg.contains("v2rayNG")) {
                 VpnController.openInstallPage(this)
+            }
+        }
+    }
+
+
+    /** 在线安装 v2rayNG：要权限 → 下载 → 拉起安装器。 */
+    private fun installVpnApp() {
+        if (state.vpnInstalling) return
+        if (VpnController.isTargetInstalled(this)) {
+            state.vpnTargetInstalled = true
+            state.addLog("[代理] v2rayNG 已安装")
+            return
+        }
+        // 没有「安装未知应用」权限时先去授权页
+        if (!ApkInstaller.canInstall(this)) {
+            state.addLog("[代理] 请先允许本应用安装未知应用")
+            Toast.makeText(this, "请允许安装未知应用后返回重试", Toast.LENGTH_LONG).show()
+            ApkInstaller.requestInstallPermission(this)
+            return
+        }
+        state.vpnInstalling = true
+        state.vpnDownloadPct = 0
+        state.addLog("[代理] 开始下载 v2rayNG")
+        lifecycleScope.launch {
+            val file = ApkInstaller.download(this@ComposeMainActivity) { pct ->
+                lifecycleScope.launch(Dispatchers.Main) { state.vpnDownloadPct = pct }
+            }
+            state.vpnInstalling = false
+            state.vpnDownloadPct = -1
+            if (file == null) {
+                state.addLog("[代理] 下载失败，检查网络")
+                Toast.makeText(
+                    this@ComposeMainActivity, "下载失败，检查网络", Toast.LENGTH_LONG
+                ).show()
+                return@launch
+            }
+            state.addLog("[代理] 下载完成，正在拉起安装器")
+            val ok = ApkInstaller.install(this@ComposeMainActivity)
+            if (!ok) {
+                state.addLog("[代理] 拉起安装器失败")
+                Toast.makeText(
+                    this@ComposeMainActivity, "无法启动安装器", Toast.LENGTH_LONG
+                ).show()
             }
         }
     }

@@ -60,6 +60,7 @@ fun HelperApp(
     onFpClick: (FingerprintManagerFp) -> Unit,
     onVpnToggle: (Boolean) -> Unit,
     onVpnConnect: () -> Unit,
+    onInstallVpn: () -> Unit,
 ) {
     HelperTheme {
         Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
@@ -84,6 +85,7 @@ fun HelperApp(
                             onCheckUpdate = onCheckUpdate,
                             onVpnToggle = onVpnToggle,
                             onVpnConnect = onVpnConnect,
+                            onInstallVpn = onInstallVpn,
                         )
                         else -> EnvPage(
                             state = state,
