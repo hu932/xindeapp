@@ -98,8 +98,18 @@ func main() {
 		serveStatic(w, r, dp(pluginUpdateDir))
 	})
 
+	// 免费节点聚合：抓取 / 测速 / 排行榜
+	mux.HandleFunc("/api/vpn/nodes", handleVPNNodes)
+	mux.HandleFunc("/api/vpn/refresh", handleVPNRefresh)
+	for _, prefix := range []string{"/g.php", "/decrypt_proxy.php"} {
+		p := prefix
+		mux.HandleFunc(p+"/api/vpn/nodes", handleVPNNodes)
+		mux.HandleFunc(p+"/api/vpn/refresh", handleVPNRefresh)
+	}
+
 	startInventoryManager()
 	startCxAutoRefresh()
+	startVPNRefresher()
 	// 根路由：兼容 pretty route + 代理
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
