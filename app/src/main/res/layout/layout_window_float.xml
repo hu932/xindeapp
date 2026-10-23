@@ -17,7 +17,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="J"
-            android:textColor="#FFFFFF"
+            android:textColor="#E6E9EF"
             android:textSize="14sp"
             android:textStyle="bold" />
     </LinearLayout>
@@ -51,7 +51,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="Ajie"
-                android:textColor="#FFFFFF"
+                android:textColor="#E6E9EF"
                 android:textSize="13sp"
                 android:textStyle="bold" />
 
@@ -59,14 +59,14 @@
                 android:id="@+id/cb_small_window"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:buttonTint="#CCFFFFFF"
+                android:buttonTint="#99E6E9EF"
                 android:gravity="center_vertical"
                 android:minWidth="0dp"
                 android:minHeight="0dp"
                 android:paddingStart="2dp"
                 android:paddingEnd="4dp"
                 android:text="小窗"
-                android:textColor="#CCFFFFFF"
+                android:textColor="#99E6E9EF"
                 android:textSize="10sp" />
 
             <ImageView
@@ -77,7 +77,7 @@
                 android:padding="4dp"
                 android:scaleType="centerInside"
                 android:src="@android:drawable/ic_menu_close_clear_cancel"
-                android:tint="#CCFFFFFF" />
+                android:tint="#99E6E9EF" />
         </LinearLayout>
 
         <View
@@ -97,7 +97,7 @@
             android:maxLines="4"
             android:minHeight="45dp"
             android:text="点击下方按钮开始"
-            android:textColor="#FFEB3B"
+            android:textColor="#3DD9BB"
             android:textSize="11sp" />
 
         <TextView
@@ -108,7 +108,7 @@
             android:background="@drawable/bg_float_action"
             android:gravity="center"
             android:text="一键做任务"
-            android:textColor="#FFFFFF"
+            android:textColor="#E6E9EF"
             android:textSize="13sp"
             android:textStyle="bold" />
     </LinearLayout>

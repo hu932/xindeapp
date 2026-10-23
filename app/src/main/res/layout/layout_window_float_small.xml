@@ -27,7 +27,7 @@
             android:maxLines="1"
             android:maxWidth="120dp"
             android:text="等待开始"
-            android:textColor="#FFEB3B"
+            android:textColor="#3DD9BB"
             android:textSize="10sp" />
 
         <TextView
@@ -36,7 +36,7 @@
             android:layout_height="wrap_content"
             android:layout_marginStart="6dp"
             android:text="完成:0 失败:0"
-            android:textColor="#FFFFFF"
+            android:textColor="#E6E9EF"
             android:textSize="10sp" />
     </LinearLayout>
 
@@ -52,6 +52,6 @@
         android:paddingEnd="6dp"
         android:paddingBottom="1dp"
         android:text="还原"
-        android:textColor="#FFFFFF"
+        android:textColor="#E6E9EF"
         android:textSize="9sp" />
 </LinearLayout>

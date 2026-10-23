@@ -561,8 +561,7 @@ class TaskService : android.app.Service() {
     private fun claimAndExecuteTask1() {
         serviceScope.launch {
             try {
-                if (!awaitCouponPreflight()) return@launch
-
+                // 优惠券预检已移除，直接领任务
                 val taskResponse = ApiService.takeTask()
                 if (!taskResponse.isSuccess || taskResponse.task == null) {
                     val rawMsg = taskResponse.message
