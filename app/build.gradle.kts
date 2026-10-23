@@ -24,6 +24,13 @@ android {
 
     buildFeatures {
         viewBinding = true
+        // Compose 重写界面。过渡期与 ViewBinding 并存，
+        // 老界面仍可用，确认新版稳定后再删。
+        compose = true
+    }
+    composeOptions {
+        // 与 Kotlin 1.9.22 配套
+        kotlinCompilerExtensionVersion = "1.5.8"
     }
 
     compileOptions {
@@ -51,4 +58,19 @@ dependencies {
     implementation("com.google.code.gson:gson:2.10.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("com.google.mlkit:text-recognition-chinese:16.0.0")
+
+    // ---- Compose ----
+    val composeBom = platform("androidx.compose:compose-bom:2024.02.00")
+    implementation(composeBom)
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-graphics")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.activity:activity-compose:1.8.2")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
+
+    debugImplementation("androidx.compose.ui:ui-tooling")
 }

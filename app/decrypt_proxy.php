@@ -104,8 +104,8 @@ $API1_AUTH = [
 
 $API2_AUTH = [
     'login_url' => 'https://zb2.eqwofaygdsjko.uk:443/api/user/login',
-    'username'  => 'xlong671',
-    'password'  => '+tc^6I$g!&',
+    'username'  => 'tpadsf531',
+    'password'  => 'a1q$r6gw9Fl52aP',
     'label'     => '接口2',
     'api_type'  => 2,
 ];

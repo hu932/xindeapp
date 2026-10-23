@@ -8,7 +8,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.app.helper.databinding.ActivityLoginBinding
 import com.app.helper.network.ApiService
-import com.app.helper.ui.main.MainActivity
+import com.app.helper.ui.compose.ComposeMainActivity
 import com.app.helper.util.TokenManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -108,7 +108,7 @@ class LoginActivity : AppCompatActivity() {
     }
 
     private fun startMain() {
-        startActivity(Intent(this, MainActivity::class.java))
+        startActivity(Intent(this, ComposeMainActivity::class.java))
         finish()
     }
 }

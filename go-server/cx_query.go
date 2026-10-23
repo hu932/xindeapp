@@ -23,21 +23,23 @@ type cxConfig struct {
 	LegacyUsername  string
 	LegacyPassword  string
 	SwitchDate      string
-	TeamMode        bool
-	TeamRemarks     []string
-	Pricing1        map[string]float64
-	Pricing2        map[string]float64
+	TeamMode         bool
+	TeamRemarks      []string
+	RemarkWhitelist2 []string
+	Pricing1         map[string]float64
+	Pricing2         map[string]float64
 }
 
 var cxConfigs = map[string]*cxConfig{
 	"cx.php": {
 		File: "cx.php", DataKey: "3bd0f92c13ed0c94",
 		Admin1Username: "tpadsf532", Admin1Password: "a1qrga$JHFl52aP",
-		Admin2Username: "xlong671", Admin2Password: "+tc^6I$g!&",
+		Admin2Username: "tpadsf531", Admin2Password: "a1q$r6gw9Fl52aP",
 		LegacyUsername: "poisu906", LegacyPassword: "dfd$d7641HETD2af",
 		SwitchDate: "2026-09-23",
+		RemarkWhitelist2: []string{"阳1", "传媒1", "杰1", "果子1"},
 		Pricing1: map[string]float64{"阳": 0.04, "胡逸": 0.04, "老妈": 0.048, "果子": 0.048, "传媒": 0.04, "杰": 0.05, "C-C5": 0.05, "C1": 0.05, "C2": 0.05, "C3": 0.05, "C4": 0.05, "C5": 0.05, "CN": 0.04, "C": 0.05},
-		Pricing2: map[string]float64{"阳": 0.043, "传媒": 0.043, "自己": 0.048, "毛毛": 0.04, "C-C5": 0.04, "C1": 0.04, "C2": 0.04, "C3": 0.04, "C4": 0.04, "C5": 0.04, "C": 0.04},
+		Pricing2: map[string]float64{"阳1": 0.04, "传媒1": 0.04, "杰1": 0.05, "果子1": 0.048, "自己": 0.048, "毛毛": 0.04, "C-C5": 0.04, "C1": 0.04, "C2": 0.04, "C3": 0.04, "C4": 0.04, "C5": 0.04, "C": 0.04},
 	},
 }
 
@@ -132,9 +134,14 @@ func cxAtomicWrite(file string, v any) {
 }
 
 // cxCacheKey：与 PHP 完全一致（PHP 对 ksort 后的关联数组 json_encode 得到对象）
-func cxCacheKey(dataKey, date string, authorizedAccounts map[string]string) string {
+// 缓存键按 api_type 隔离，避免接口1/接口2 共用同一份缓存导致数据串台。
+func cxCacheKey(dataKey, date string, apiType int, authorizedAccounts map[string]string) string {
 	accJSON, _ := json.Marshal(authorizedAccounts)
-	return "cx_v2_" + dataKey + "_" + date + "_" + md5hex(string(accJSON))
+	api := "1"
+	if apiType == 2 {
+		api = "2"
+	}
+	return "cx_v2_" + dataKey + "_" + api + "_" + date + "_" + md5hex(string(accJSON))
 }
 
 func cxRowsHaveData(rows []map[string]any) bool {
@@ -236,8 +243,12 @@ func cxLastGoodFile(key string) string {
 	return cxCacheDirName + "/cx_lastgood_" + md5hex(key) + ".json"
 }
 
-func cxDateLastGoodFile(dataKey, date string) string {
-	return cxCacheDirName + "/cx_date_lastgood_" + dataKey + "_" + md5hex(date) + ".json"
+func cxDateLastGoodFile(dataKey, date string, apiType int) string {
+	suffix := ""
+	if apiType == 2 {
+		suffix = "_api2"
+	}
+	return cxCacheDirName + "/cx_date_lastgood_" + dataKey + suffix + "_" + md5hex(date) + ".json"
 }
 
 func cxCacheFile(key string) string {
@@ -336,11 +347,11 @@ func cxLoadAuthorizedAccounts(cfg *cxConfig, apiType int, date string, reqCtx *h
 	if len(result) > 0 {
 		cxAtomicWrite(cxCacheDirName+"/cx_authorized_accounts_lastgood_"+md5short(username)+".json", map[string]any{"_ts": timeNowUnix(), "accounts": result})
 	}
-	// 团队C 过滤
-	if cfg.TeamMode && apiType == 1 {
+	// 接口2 备注白名单过滤（只查询指定备注的账号，不影响团队C聚合逻辑）
+	if apiType == 2 && len(cfg.RemarkWhitelist2) > 0 {
 		filtered := map[string]string{}
 		for u, r := range result {
-			if containsStr(cfg.TeamRemarks, strings.TrimSpace(r)) {
+			if containsStr(cfg.RemarkWhitelist2, strings.TrimSpace(r)) {
 				filtered[u] = r
 			}
 		}
@@ -353,11 +364,10 @@ func cxLoadAuthorizedAccounts(cfg *cxConfig, apiType int, date string, reqCtx *h
 func cxGetToken(cfg *cxConfig, apiType int, date string) string {
 	username := cfg.Admin1Username
 	password := cfg.Admin1Password
-	base := api1Base
+	base := api1Base // 接口2 账号同样登录 zb1，与接口1 共用上游
 	if apiType == 2 {
 		username = cfg.Admin2Username
 		password = cfg.Admin2Password
-		base = api2Base
 	}
 	if apiType == 1 && date < cfg.SwitchDate {
 		username = cfg.LegacyUsername
@@ -441,15 +451,12 @@ func CxQuery(cfgFile string, apiType int, date string, autoRefresh, forceRefresh
 	if apiType != 2 {
 		apiType = 1
 	}
-	base := api1Base
-	if apiType == 2 {
-		base = api2Base
-	}
+	base := api1Base // 接口2 账号同样登录 zb1，与接口1 共用上游
 	startTime := date + " 00:00:00"
 	endTime := date + " 23:59:59"
 
 	authorizedAccounts := cxLoadAuthorizedAccounts(cfg, apiType, date, reqCtx)
-	cacheKey := cxCacheKey(cfg.DataKey, date, authorizedAccounts)
+	cacheKey := cxCacheKey(cfg.DataKey, date, apiType, authorizedAccounts)
 
 	// 冷却检查
 	cooldownLeft := cxCooldownRemaining(cacheKey)
@@ -531,7 +538,7 @@ func CxQuery(cfgFile string, apiType int, date string, autoRefresh, forceRefresh
 	}
 
 	lastGood := cxReadPayloadFile(cxLastGoodFile(cacheKey))
-	dateLastGood := cxReadPayloadFile(cxDateLastGoodFile(cfg.DataKey, date))
+	dateLastGood := cxReadPayloadFile(cxDateLastGoodFile(cfg.DataKey, date, apiType))
 
 	if shouldFetch {
 		cxSetCooldown(cacheKey, cxRetryBackoff, "正在刷新", false)
@@ -558,6 +565,11 @@ func CxQuery(cfgFile string, apiType int, date string, autoRefresh, forceRefresh
 				}
 				sort.Strings(userList)
 				ok2, msg2, authRows, _ := cxFetchSettleView(base, token, userList, startTime, endTime)
+				// 白名单明细查询是每轮刷新的第 2 个上游请求，最容易撞限流；限流时短退避重试一次（与 PHP 一致）
+				if !ok2 && isRateLimitMsg(msg2) {
+					time.Sleep(2500 * time.Millisecond)
+					ok2, msg2, authRows, _ = cxFetchSettleView(base, token, userList, startTime, endTime)
+				}
 				if ok2 {
 					batchItems = []map[string]any{}
 					for _, r := range authRows {
@@ -635,7 +647,7 @@ func CxQuery(cfgFile string, apiType int, date string, autoRefresh, forceRefresh
 				persist["authorizedAccounts"] = mapToAnyMap(authorizedAccounts)
 				cxWritePayloadFile(cxCacheFile(cacheKey), persist)
 				cxWritePayloadFile(cxLastGoodFile(cacheKey), persist)
-				cxWritePayloadFile(cxDateLastGoodFile(cfg.DataKey, date), persist)
+				cxWritePayloadFile(cxDateLastGoodFile(cfg.DataKey, date, apiType), persist)
 				fromCache = false
 				cacheAge = 0
 				cxClearCooldown(cacheKey)
@@ -822,7 +834,8 @@ func cxClearCache() map[string]any {
 	cxFetchLocks = map[string]*sync.Mutex{}
 	cxCacheMu.Unlock()
 	deleted := 0
-	patterns := []string{"cx_cache_*.json", "cx_lastgood_*.json", "cx_date_lastgood_*.json", "cx_switchold_*.json", "cx_cooldown_*.json", "cx_api_token_cache*.json", "cx_authorized_accounts_lastgood*.json"}
+	// 注意：不删 cx_date_lastgood_* / cx_switchold_*，它们是按日期保存的历史归档，清缓存不应丢历史数据
+	patterns := []string{"cx_cache_*.json", "cx_lastgood_*.json", "cx_cooldown_*.json", "cx_api_token_cache*.json", "cx_authorized_accounts_lastgood*.json"}
 	for _, p := range patterns {
 		matches, _ := filepathGlob(cxCacheDirName + "/" + p)
 		for _, f := range matches {

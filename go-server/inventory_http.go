@@ -294,7 +294,7 @@ func cxAuditFailAlloc(dataKey, date string) map[string]any {
 	if date == "" {
 		date = tsDate()
 	}
-	payload := cxReadPayloadFile(cxDateLastGoodFile(dataKey, date))
+	payload := cxReadPayloadFile(cxDateLastGoodFile(dataKey, date, 1))
 	if payload == nil {
 		return map[string]any{"date": date, "dataKey": dataKey, "count": 0}
 	}

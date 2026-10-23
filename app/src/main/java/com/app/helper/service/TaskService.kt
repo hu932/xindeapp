@@ -30,6 +30,7 @@ import com.app.helper.network.ApiService
 import com.app.helper.network.CouponPreflight
 import com.app.helper.network.ExtTask
 import com.app.helper.util.DelayPrefs
+import com.app.helper.util.CrashHandler
 import com.app.helper.util.TokenManager
 import kotlinx.coroutines.*
 import org.json.JSONObject
@@ -122,6 +123,17 @@ class TaskService : android.app.Service() {
         createFloatWindow()
         startHeartbeat()
         startUpdateCheck()
+        // 崩溃时把任务现场一起写进报告，否则只有堆栈不知道当时跑到哪一步
+        CrashHandler.stateProvider = {
+            buildString {
+                appendLine("自动运行: $isAutoRunning")
+                appendLine("上传中: $isUploading")
+                appendLine("连续超时: $consecutiveTimeouts")
+                appendLine("待处理数据: ${pendingFileContent?.length ?: 0} 字节")
+                appendLine("任务ID: $currentTaskId")
+                appendLine("shopId: $currentShopId  itemId: $currentItemId")
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

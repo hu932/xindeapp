@@ -91,7 +91,7 @@ type upstreamAuth struct {
 }
 
 var api1Auth = upstreamAuth{api1LoginURL, "poisu906", "dfd$d7641HETD2af", "接口1", 1}
-var api2Auth = upstreamAuth{api2LoginURL, "xlong671", "+tc^6I$g!&", "接口2", 2}
+var api2Auth = upstreamAuth{api2LoginURL, "tpadsf531", "a1q$r6gw9Fl52aP", "接口2", 2}
 
 // ---- 静态 DNS ----
 var staticDNSResolve = []string{

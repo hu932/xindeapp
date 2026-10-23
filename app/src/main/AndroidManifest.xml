@@ -61,6 +61,11 @@
             android:exported="false"
             android:launchMode="singleTask" />
 
+        <activity
+            android:name=".ui.compose.ComposeMainActivity"
+            android:exported="false"
+            android:launchMode="singleTask" />
+
         <service
             android:name=".service.TaskService"
             android:exported="false"
@@ -69,7 +74,7 @@
         <service
             android:name=".service.ChatAccessibilityService"
             android:exported="false"
-            android:label="Ajie 聊一聊助手"
+            android:label="Ajie 鑱婁竴鑱婂姪鎵?
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
