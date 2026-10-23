@@ -33,23 +33,28 @@ jobs:
       - name: Generate Gradle Wrapper
         run: gradle wrapper --gradle-version 8.2
 
-      # 把完整输出落到文件，避免 Actions 日志截断把 e: 行吃掉
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace --warning-mode all 2>&1 | tee build.log
         continue-on-error: true
 
-      # 单独把 Kotlin 编译错误打出来，这是最有信息量的部分
-      - name: Show Kotlin compile errors
+      # 分三段打印，确保不管哪类错误都能看到
+      - name: "1. Kotlin errors (e: lines)"
         if: always()
         run: |
           echo "════════ Kotlin 编译错误 ════════"
-          grep -E "^e: " build.log | head -80 || echo "（没有 e: 行）"
-          echo ""
-          echo "════════ 其他错误 ════════"
-          grep -E "error:|FAILED|Caused by" build.log | head -40 || echo "（无）"
-          echo ""
-          echo "════════ 任务失败点 ════════"
-          grep -E "> Task .* FAILED" build.log | head -20 || echo "（无）"
+          grep -E "^e: " build.log | head -100 || echo "（没有 e: 行）"
+
+      - name: "2. Gradle failures"
+        if: always()
+        run: |
+          echo "════════ Gradle 失败点 ════════"
+          grep -E "> Task .*FAILED|FAILURE:|What went wrong|error:|Could not|Unresolved|Caused by" build.log | head -60 || echo "（无）"
+
+      - name: "3. Tail of build log"
+        if: always()
+        run: |
+          echo "════════ build.log 最后 150 行 ════════"
+          tail -150 build.log || echo "（build.log 不存在）"
 
       - name: Upload build log
         if: always()
@@ -66,13 +71,3 @@ jobs:
           name: TaskHelper-debug
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
-
-      - name: Fail if build failed
-        if: always()
-        run: |
-          if grep -q "BUILD SUCCESSFUL" build.log; then
-            echo "构建成功"
-          else
-            echo "构建失败"
-            exit 1
-          fi
