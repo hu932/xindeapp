@@ -382,20 +382,40 @@ object ApiService {
     suspend fun fetchFingerprintEnv(): JSONObject? = withContext(Dispatchers.IO) {
         try {
             val token = TokenManager.getToken()
-            val url = ApiConfig.GO_BASE_URL + ApiConfig.FP_ENV_GENERATE_PATH +
-                    "?token=" + java.net.URLEncoder.encode(token, "UTF-8")
+            // 服务端只对 /api/task 放行 GET，其余接口一律 POST，
+            // 用 GET 会在鉴权前就被 405 挡掉。
+            val payload = JSONObject().apply {
+                put("token", token)
+                put("act", "fp_env_generate")
+            }
             val request = Request.Builder()
-                .url(url)
-                .get()
+                .url(ApiConfig.GO_BASE_URL + ApiConfig.FP_ENV_GENERATE_PATH)
+                .post(payload.toString().toRequestBody("application/json".toMediaType()))
                 .apply { if (token.isNotBlank()) addHeader("Authorization", "Bearer $token") }
                 .build()
             val response = api2Client.newCall(request).execute()
+            val code = response.code
             val body = response.body?.string()
-            if (body.isNullOrBlank()) return@withContext null
+            if (body.isNullOrBlank()) {
+                android.util.Log.w("ApiService", "fp_env: HTTP $code, empty body")
+                return@withContext null
+            }
             val root = JSONObject(body)
-            if (!root.optBoolean("success", false)) return@withContext null
-            val data = root.optJSONObject("data") ?: return@withContext null
-            data.optJSONObject("fp")
+            if (!root.optBoolean("success", false)) {
+                val err = root.optString("error", root.optString("msg", ""))
+                android.util.Log.w("ApiService", "fp_env: HTTP $code, success=false, error=$err")
+                return@withContext null
+            }
+            val data = root.optJSONObject("data")
+            if (data == null) {
+                android.util.Log.w("ApiService", "fp_env: HTTP $code, no data field")
+                return@withContext null
+            }
+            val fp = data.optJSONObject("fp")
+            if (fp == null) {
+                android.util.Log.w("ApiService", "fp_env: HTTP $code, no fp field, data=$data")
+            }
+            fp
         } catch (_: Exception) {
             null
         }
