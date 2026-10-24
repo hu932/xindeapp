@@ -233,6 +233,17 @@ func handleProxyQueryActPOST(w http.ResponseWriter, r *http.Request) bool {
 		}
 		writeJSONOK(w, shadowAccountSave(readRawJSONBody(r)))
 		return true
+	case act == "custom_nodes_save":
+		key := getAuthKey(r)
+		if !verifyAuthKey(key) {
+			writeJSONOK(w, map[string]any{"ok": false, "msg": "密码错误"})
+			return true
+		}
+		res := customNodesSave(readRawJSONBody(r))
+		// 存完立刻刷新一次，用户不用等下一个周期
+		go syncVPNNodes()
+		writeJSONOK(w, res)
+		return true
 	case act == "avatar_upload":
 		key := getAuthKey(r)
 		if !verifyAuthKey(key) {

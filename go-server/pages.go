@@ -359,6 +359,12 @@ nav,.side-foot{padding:6px}
 <div id="vpnRegions" style="margin:10px 0"></div>
 <div id="vpnList"></div>
 </div>
+
+<div class="card">
+<div class="card-head"><h2>自定义节点</h2><div class="row"><span class="muted" id="customNodeCount"></span><button class="btn primary sm" onclick="saveCustomNodes()">保存并刷新</button></div></div>
+<div class="hint">自己搭的节点放这里，刷新时会和抓取结果合并，并且排在列表最前面。每行一个分享链接，支持 vless / vmess / trojan / ss / ssr / hysteria2。</div>
+<textarea id="customNodesText" rows="6" placeholder="vless://uuid@1.2.3.4:443?security=reality&...#台湾自建&#10;trojan://password@5.6.7.8:443#香港自建"></textarea>
+</div>
 </div>
 
 <div id="tab-shadow" class="tabpane hidden">
@@ -439,7 +445,7 @@ applyTheme(localStorage.getItem('admin_theme')||'light');
 setInterval(function(){if(!KEY)return;if(currentTab==='ov')loadOverview();else if(currentTab==='logs')loadLogs();else if(currentTab==='accounts')loadAccounts();else if(currentTab==='devices')loadDevices();else if(currentTab==='cache')loadCache();},10000);
 function logout(){localStorage.removeItem('admin_key');location.reload();}
 function doLogin(){KEY=document.getElementById('keyInput').value.trim();if(!KEY){toast('请输入后台密码','error');return;}api('logs&limit=1').then(function(d){if(d.ok===false){toast(d.msg||'密码错误','error');return;}localStorage.setItem('admin_key',KEY);showApp();switchTab('ov');});}
-function switchTab(t){currentTab=t;var ps=document.querySelectorAll('.tabpane');for(var i=0;i<ps.length;i++)ps[i].classList.add('hidden');var pane=document.getElementById('tab-'+t);if(pane)pane.classList.remove('hidden');var ns=document.querySelectorAll('.sidebar .nav');for(var j=0;j<ns.length;j++)ns[j].classList.toggle('active',ns[j].getAttribute('data-t')===t);var titles={ov:'总览',logs:'日志',accounts:'插件账号',devices:'设备',auth:'授权账号',sub:'子账号',update:'更新配置',cache:'缓存',inv:'库存模式',shadow:'影子账号',vpn:'节点'};document.getElementById('topTitle').textContent=titles[t]||'';if(t==='ov')loadOverview();if(t==='logs')loadLogs();if(t==='accounts')loadAccounts();if(t==='devices')loadDevices();if(t==='auth'){loadAuth(1);loadAuth(2);}if(t==='sub')loadSubs();if(t==='update'){loadUpdate();loadVer();loadPluginUpdate();}if(t==='cache')loadCache();if(t==='shadow')loadShadow();if(t==='vpn')loadVpnNodes();if(t==='inv'){loadInv();loadInvSub();loadInvDetail();loadInvAudit();loadInvSubmitLogs();if(invTimer)clearInterval(invTimer);invTimer=setInterval(function(){loadInvDetail();loadInvAudit();loadInvSubmitLogs();},3000);}else{if(invTimer){clearInterval(invTimer);invTimer=null;}}}
+function switchTab(t){currentTab=t;var ps=document.querySelectorAll('.tabpane');for(var i=0;i<ps.length;i++)ps[i].classList.add('hidden');var pane=document.getElementById('tab-'+t);if(pane)pane.classList.remove('hidden');var ns=document.querySelectorAll('.sidebar .nav');for(var j=0;j<ns.length;j++)ns[j].classList.toggle('active',ns[j].getAttribute('data-t')===t);var titles={ov:'总览',logs:'日志',accounts:'插件账号',devices:'设备',auth:'授权账号',sub:'子账号',update:'更新配置',cache:'缓存',inv:'库存模式',shadow:'影子账号',vpn:'节点'};document.getElementById('topTitle').textContent=titles[t]||'';if(t==='ov')loadOverview();if(t==='logs')loadLogs();if(t==='accounts')loadAccounts();if(t==='devices')loadDevices();if(t==='auth'){loadAuth(1);loadAuth(2);}if(t==='sub')loadSubs();if(t==='update'){loadUpdate();loadVer();loadPluginUpdate();}if(t==='cache')loadCache();if(t==='shadow')loadShadow();if(t==='vpn'){loadVpnNodes();loadCustomNodes();}if(t==='inv'){loadInv();loadInvSub();loadInvDetail();loadInvAudit();loadInvSubmitLogs();if(invTimer)clearInterval(invTimer);invTimer=setInterval(function(){loadInvDetail();loadInvAudit();loadInvSubmitLogs();},3000);}else{if(invTimer){clearInterval(invTimer);invTimer=null;}}}
 function statCard(l,v,c){return '<div class="stat" style="border-top-color:'+c+'"><div class="s-l">'+esc(l)+'</div><div class="s-v" style="color:'+c+'">'+v+'</div></div>';}
 function loadOverview(){Promise.all([api('devices'),api('decoded_ext_accounts'),api('logs&limit=200'),api('sub_accounts'),api('inventory_status'),api('cache_overview')]).then(function(rs){var dev=rs[0],acc=rs[1],logs=rs[2],subs=rs[3],inv=rs[4],cache=rs[5];var accRows=acc.data||[],logRows=logs.data||[],subRows=subs.data||[],invRows=inv.data||[];var accOn=accRows.filter(function(a){return a.enabled;}).length;var invQ=0,invOk=0,invFail=0;for(var i=0;i<invRows.length;i++){invQ+=invRows[i].queue||0;invOk+=invRows[i].success||0;invFail+=invRows[i].fail||0;}var items=(cache.data&&cache.data.items)||[];var cFiles=0,cBytes=0;for(var j=0;j<items.length;j++){cFiles+=items[j].files||0;cBytes+=items[j].bytes||0;}document.getElementById('ovCards').innerHTML=statCard('在线设备',(dev.online_count||0)+' 台','#60a5fa')+statCard('插件账号',accOn+'/'+accRows.length+' 启用','#818cf8')+statCard('子账号',subRows.length+' 个','#22d3ee')+statCard('成功转发',logRows.length+' 条','#34d399')+statCard('库存·在库',invQ+' 条','#a78bfa')+statCard('库存·今日成功',invOk+' 条','#34d399')+statCard('库存·今日失败',invFail+' 条','#f87171')+statCard('缓存占用',(cBytes/1048576).toFixed(1)+' MB','#fbbf24');var recent=logRows.slice(-8).reverse();document.getElementById('ovRecent').innerHTML=recent.length?('<table class="tbl"><thead><tr><th>时间</th><th>账号</th><th>备注</th></tr></thead><tbody>'+recent.map(function(l){return '<tr><td class="mono">'+esc(l.time)+'</td><td>'+esc(l.username)+'</td><td>'+esc(l.account_remark||'-')+'</td></tr>';}).join('')+'</tbody></table>'):'<div class="empty">暂无日志</div>';});}
 var LOG_ROWS=[];
@@ -454,6 +460,21 @@ function delAcc(id){if(!confirm('删除 '+id+'？'))return;api('decoded_ext_acco
 var SHADOW={};
 function loadShadow(){api('shadow_account_get').then(function(d){if(!d.ok){toast(d.msg||'读取失败','error');return;}var v=d.data||{};SHADOW=v;document.getElementById('shadowUser').value=v.file_username||'';document.getElementById('shadowPass').value=v.file_password||'';document.getElementById('shadowRemark').value=v.file_remark||'sys';var st='';var pill=function(dot,bg,bd,inner){return '<div style="display:flex;align-items:flex-start;gap:10px;padding:12px 16px;border-radius:10px;background:'+bg+';border:1px solid '+bd+';font-size:var(--fs-base);line-height:1.5"><span style="width:8px;height:8px;border-radius:50%;background:'+dot+';margin-top:6px;flex-shrink:0"></span><span>'+inner+'</span></div>';};if(v.env_locked){st=pill('var(--bad)','rgba(239,68,68,.08)','rgba(239,68,68,.28)','环境变量 <b>SHADOW_ACCOUNT_USERNAME</b> 已设置，当前生效的是 <b>'+esc(v.env_username)+'</b>。此页保存只写入文件，不会覆盖环境变量。');}else if(v.active){st=pill('var(--ok)','rgba(16,185,129,.08)','rgba(16,185,129,.28)','已启用 <b>'+esc(v.username)+'</b>'+(v.remark?'　备注 '+esc(v.remark):'')+'　—— 每个插件账号的接口1 池末尾都会自动补一个它。');}else{st=pill('var(--muted)','rgba(107,119,140,.08)','rgba(107,119,140,.24)','未启用。所有账号池保持原样，插件用户看到的数量和实际完全一致。');}document.getElementById('shadowStatus').innerHTML=st;renderShadowInject(v);loadShadowLogs();});}
 function renderShadowInject(v){var box=document.getElementById('shadowInjection');var stat=document.getElementById('shadowInjStats');var rows=v.injection||[];if(!rows.length){box.innerHTML='<div class="hint">还没有插件账号</div>';stat.textContent='';return;}var okN=0;rows.forEach(function(r){if(r.injected)okN++;});stat.textContent=okN+' / '+rows.length+' 个账号已注入';var h='<table class="tbl"><thead><tr><th>插件账号</th><th>可见</th><th>实际</th><th>影子</th></tr></thead><tbody>';rows.forEach(function(r){var ok=r.injected&&r.actual>r.visible;h+='<tr><td><b>'+esc(r.accountId)+'</b></td><td>'+r.visible+'</td><td>'+r.actual+'</td><td style="color:'+(ok?'var(--ok)':'var(--bad)')+'">'+(r.injected?(ok?'已注入':'已注入但未隐藏'):'未注入')+'</td></tr>';});h+='</tbody></table>';box.innerHTML=h;}
+function loadCustomNodes(){
+  api('custom_nodes_get').then(function(d){
+    if(!d||!d.ok) return;
+    document.getElementById('customNodesText').value=d.data||'';
+    document.getElementById('customNodeCount').textContent=(d.count||0)+' 个';
+  }).catch(function(){});
+}
+function saveCustomNodes(){
+  var text=document.getElementById('customNodesText').value;
+  api('custom_nodes_save',{method:'POST',body:{links:text}}).then(function(d){
+    toast(d&&d.msg?d.msg:'已保存', d&&d.ok?'success':'error');
+    loadCustomNodes();
+    setTimeout(loadVpnNodes,8000);
+  }).catch(function(){toast('保存失败','error');});
+}
 function regionLabel(r){
   if(!r) return '未知';
   if(r==='CF') return 'CF中继';

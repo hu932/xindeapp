@@ -411,6 +411,9 @@ func handleProxyGET(w http.ResponseWriter, r *http.Request) {
 	case "inventory_audit":
 		handleInventoryAuditGet(w, r)
 		return
+	case "custom_nodes_get":
+		writeJSONOK(w, customNodesGet())
+		return
 	case "avatar_get":
 		writeJSONOK(w, avatarGet(trimStr(r.URL.Query().Get("accountId"))))
 		return

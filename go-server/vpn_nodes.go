@@ -384,6 +384,11 @@ func syncVPNNodes() {
 			break
 		}
 	}
+	// 用户自建 / 自购的节点优先保留，放在最前面，
+	// 数量超限时也不会被公开源挤掉
+	custom := customNodes()
+	all = append(custom, all...)
+
 	all = dedupNodes(all)
 	if len(all) > vpnMaxNodes {
 		all = all[:vpnMaxNodes]
