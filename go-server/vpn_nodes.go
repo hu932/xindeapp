@@ -190,27 +190,115 @@ func parseURI(link, src string) *vpnNode {
 	}
 }
 
-// guessRegion 从节点名里猜地区，用于客户端筛选。
+// guessRegion 从节点名里猜地区。
+//
+// 免费节点命名五花八门：有的带 emoji 旗帜，有的写中文，有的只写机场编号，
+// 还有相当一部分完全没有地区信息。按「越明确越优先」逐层降级：
+//   1. emoji 旗帜（两个 Regional Indicator 组成国家码）
+//   2. 中文地区名
+//   3. 英文国家 / 城市名
+//   4. 两字母国家码（要求独立词，避免 "TW" 命中 "NETWORK"）
+// 全不中返回「未知」，比 UNKNOWN 友好。
 func guessRegion(name string) string {
-	n := strings.ToUpper(name)
-	table := []struct{ key, region string }{
-		{"台湾", "TW"}, {"台灣", "TW"}, {"TAIWAN", "TW"}, {"TW", "TW"},
-		{"香港", "HK"}, {"HONGKONG", "HK"}, {"HONG KONG", "HK"}, {"HK", "HK"},
-		{"日本", "JP"}, {"JAPAN", "JP"}, {"JP", "JP"}, {"东京", "JP"},
-		{"新加坡", "SG"}, {"SINGAPORE", "SG"}, {"SG", "SG"},
-		{"美国", "US"}, {"UNITED STATES", "US"}, {"USA", "US"}, {"US", "US"},
-		{"韩国", "KR"}, {"KOREA", "KR"}, {"KR", "KR"},
-		{"德国", "DE"}, {"GERMANY", "DE"}, {"DE", "DE"},
-		{"英国", "GB"}, {"UK", "GB"}, {"GB", "GB"},
-		{"荷兰", "NL"}, {"NL", "NL"},
-		{"法国", "FR"}, {"FR", "FR"},
+	if name == "" {
+		return "未知"
 	}
-	for _, t := range table {
-		if strings.Contains(n, t.key) {
+
+	// 1. emoji 旗帜
+	runes := []rune(name)
+	for i := 0; i < len(runes)-1; i++ {
+		a, b := runes[i], runes[i+1]
+		if a >= 0x1F1E6 && a <= 0x1F1FF && b >= 0x1F1E6 && b <= 0x1F1FF {
+			return string([]rune{
+				'A' + (a - 0x1F1E6),
+				'A' + (b - 0x1F1E6),
+			})
+		}
+	}
+
+	upper := strings.ToUpper(name)
+
+	// 2. 中文地区名
+	zh := []struct{ key, region string }{
+		{"台湾", "TW"}, {"台灣", "TW"}, {"臺灣", "TW"}, {"台北", "TW"},
+		{"香港", "HK"},
+		{"日本", "JP"}, {"东京", "JP"}, {"東京", "JP"}, {"大阪", "JP"},
+		{"新加坡", "SG"},
+		{"美国", "US"}, {"美國", "US"},
+		{"韩国", "KR"}, {"韓國", "KR"}, {"首尔", "KR"},
+		{"英国", "GB"}, {"德国", "DE"}, {"德國", "DE"},
+		{"法国", "FR"}, {"荷蘭", "NL"}, {"荷兰", "NL"},
+		{"俄罗斯", "RU"}, {"俄羅斯", "RU"},
+		{"加拿大", "CA"}, {"澳大利亚", "AU"}, {"澳洲", "AU"},
+		{"印度", "IN"}, {"土耳其", "TR"}, {"巴西", "BR"}, {"阿根廷", "AR"},
+		{"越南", "VN"}, {"泰国", "TH"}, {"马来西亚", "MY"},
+		{"印尼", "ID"}, {"菲律宾", "PH"},
+	}
+	for _, t := range zh {
+		if strings.Contains(name, t.key) {
 			return t.region
 		}
 	}
-	return "UNKNOWN"
+
+	// 3. 英文国家 / 城市
+	en := []struct{ key, region string }{
+		{"TAIWAN", "TW"}, {"TAIPEI", "TW"},
+		{"HONGKONG", "HK"}, {"HONG KONG", "HK"}, {"HKIX", "HK"},
+		{"JAPAN", "JP"}, {"TOKYO", "JP"}, {"OSAKA", "JP"},
+		{"SINGAPORE", "SG"},
+		{"UNITED STATES", "US"}, {"AMERICA", "US"},
+		{"LOS ANGELES", "US"}, {"SEATTLE", "US"}, {"SILICON", "US"},
+		{"KOREA", "KR"}, {"SEOUL", "KR"},
+		{"GERMANY", "DE"}, {"FRANKFURT", "DE"},
+		{"BRITAIN", "GB"}, {"LONDON", "GB"}, {"ENGLAND", "GB"},
+		{"FRANCE", "FR"}, {"PARIS", "FR"},
+		{"NETHERLANDS", "NL"}, {"AMSTERDAM", "NL"},
+		{"RUSSIA", "RU"}, {"MOSCOW", "RU"},
+		{"CANADA", "CA"}, {"TORONTO", "CA"},
+		{"AUSTRALIA", "AU"}, {"SYDNEY", "AU"},
+		{"INDIA", "IN"}, {"MUMBAI", "IN"},
+		{"TURKEY", "TR"}, {"BRAZIL", "BR"}, {"ARGENTINA", "AR"},
+		{"VIETNAM", "VN"}, {"THAILAND", "TH"}, {"MALAYSIA", "MY"},
+		{"INDONESIA", "ID"}, {"PHILIPPINES", "PH"},
+	}
+	for _, t := range en {
+		if strings.Contains(upper, t.key) {
+			return t.region
+		}
+	}
+
+	// 4. 两字母国家码，必须独立成词
+	codes := []string{
+		"TW", "HK", "JP", "SG", "US", "KR", "DE", "GB", "FR", "NL",
+		"RU", "CA", "AU", "IN", "TR", "BR", "AR", "VN", "TH", "MY",
+		"ID", "PH", "IT", "ES", "SE", "CH", "PL", "UA", "AE", "IL",
+	}
+	sep := func(r byte) bool {
+		switch r {
+		case ' ', '-', '_', '|', '.', '/', '(', ')', '[', ']', ':', ',', '+':
+			return true
+		}
+		return false
+	}
+	for _, code := range codes {
+		idx := 0
+		for {
+			i := strings.Index(upper[idx:], code)
+			if i < 0 {
+				break
+			}
+			pos := idx + i
+			leftOK := pos == 0 || sep(upper[pos-1])
+			rightPos := pos + len(code)
+			rightOK := rightPos >= len(upper) || sep(upper[rightPos])
+			if leftOK && rightOK {
+				return code
+			}
+			idx = pos + 1
+		}
+	}
+
+	return "未知"
 }
 
 // parseSub 把一份订阅内容拆成节点。

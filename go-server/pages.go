@@ -391,6 +391,15 @@ nav,.side-foot{padding:6px}
 <div class="modal-box">
 <div class="card-head"><h2 id="accModalTitle">添加插件账号</h2><button class="btn ghost sm" onclick="closeAccModal()">关闭</button></div>
 <div class="form-grid">
+<label class="full">头像
+  <div class="row" style="align-items:center;gap:12px">
+    <img id="accAvatarPreview" alt="" style="width:56px;height:56px;border-radius:14px;object-fit:cover;background:var(--row-hover);display:none">
+    <span id="accAvatarHint" class="muted" style="font-size:12px">未设置</span>
+    <input id="accAvatarFile" type="file" accept="image/*" style="display:none" onchange="onAccAvatarPicked()">
+    <button class="btn ghost sm" type="button" onclick="document.getElementById('accAvatarFile').click()">选择图片</button>
+    <button class="btn ghost sm" type="button" onclick="clearAccAvatar()">清除</button>
+  </div>
+</label>
 <label>账号ID（留空自动生成）<input id="accId" type="text"></label>
 <label>备注<input id="accRemark" type="text"></label>
 <label class="full">接口1 任务账号（每行：用户名|密码|备注）<textarea id="accApi1" rows="4"></textarea></label>
@@ -512,9 +521,67 @@ function resolveExtServerBaseUrl(){var b=String(EXT_SERVER_BASE_URL||'').trim();
 function accConfigText(a){return JSON.stringify({serverBaseUrl:resolveExtServerBaseUrl(),accountId:String(a.accountId||''),token:String(a.token||''),idleDelayMs:5000,errorDelayMs:4000,captureTimeoutMs:180000,deadlineBufferMs:5000},null,2);}
 function copyAccConfig(id){var a=accById(id);if(!a){toast('未找到账号','error');return;}var text=accConfigText(a);if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(function(){toast('配置已复制，可直接粘贴为 config.json','success');}).catch(function(){prompt('复制下面的 config.json 内容',text);});}else{prompt('复制下面的 config.json 内容',text);}}
 function openAccModal(){accEditing=false;document.getElementById('accModalTitle').textContent='添加插件账号';document.getElementById('accId').value='';document.getElementById('accRemark').value='';document.getElementById('accApi1').value='';document.getElementById('accApi2').value='';document.getElementById('accMode').value='poll';document.getElementById('accPara').value='1';document.getElementById('accEnabled').checked=true;document.getElementById('accFpEnv').checked=false;document.getElementById('accFpQuota').value='0';document.getElementById('accModal').classList.remove('hidden');}
-function editAcc(id){api('decoded_ext_account_detail&accountId='+encodeURIComponent(id)).then(function(d){var a=d.data;if(!a){toast('未找到账号','error');return;}accEditing=true;document.getElementById('accModalTitle').textContent='编辑插件账号：'+a.accountId;document.getElementById('accId').value=a.accountId;document.getElementById('accRemark').value=a.remark||'';document.getElementById('accApi1').value=(a.api1_accounts||[]).map(function(x){return x.username+'|'+(x.password||'')+'|'+(x.remark||'');}).join('\n');document.getElementById('accApi2').value=(a.api2_accounts||[]).map(function(x){return x.username+'|'+(x.password||'')+'|'+(x.remark||'');}).join('\n');document.getElementById('accMode').value=a.task_mode==='concurrent'?'concurrent':'poll';document.getElementById('accPara').value=a.task_parallelism||1;document.getElementById('accEnabled').checked=a.enabled!==false;document.getElementById('accFpEnv').checked=!!a.fp_env_enabled;document.getElementById('accFpQuota').value=a.fp_env_daily_quota||0;document.getElementById('accModal').classList.remove('hidden');});}
+function editAcc(id){api('decoded_ext_account_detail&accountId='+encodeURIComponent(id)).then(function(d){var a=d.data;if(!a){toast('未找到账号','error');return;}accEditing=true;document.getElementById('accModalTitle').textContent='编辑插件账号：'+a.accountId;loadAccAvatar(a.accountId);document.getElementById('accId').value=a.accountId;document.getElementById('accRemark').value=a.remark||'';document.getElementById('accApi1').value=(a.api1_accounts||[]).map(function(x){return x.username+'|'+(x.password||'')+'|'+(x.remark||'');}).join('\n');document.getElementById('accApi2').value=(a.api2_accounts||[]).map(function(x){return x.username+'|'+(x.password||'')+'|'+(x.remark||'');}).join('\n');document.getElementById('accMode').value=a.task_mode==='concurrent'?'concurrent':'poll';document.getElementById('accPara').value=a.task_parallelism||1;document.getElementById('accEnabled').checked=a.enabled!==false;document.getElementById('accFpEnv').checked=!!a.fp_env_enabled;document.getElementById('accFpQuota').value=a.fp_env_daily_quota||0;document.getElementById('accModal').classList.remove('hidden');});}
 function closeAccModal(){document.getElementById('accModal').classList.add('hidden');}
-function saveAcc(){var api1=parseTaskLines(document.getElementById('accApi1').value);var api2=parseTaskLines(document.getElementById('accApi2').value);if(!accEditing&&!api1.length&&!api2.length){toast('请至少配置一个任务账号','error');return;}var body={accountId:document.getElementById('accId').value.trim(),remark:document.getElementById('accRemark').value.trim(),task_mode:document.getElementById('accMode').value,task_parallelism:parseInt(document.getElementById('accPara').value)||1,enabled:document.getElementById('accEnabled').checked,fp_env_enabled:document.getElementById('accFpEnv').checked,fp_env_daily_quota:parseInt(document.getElementById('accFpQuota').value)||0};if(api1.length)body.api1_accounts=api1;if(api2.length)body.api2_accounts=api2;api('decoded_ext_account_save',{method:'POST',body:body}).then(function(d){toast(d.ok?'已保存':'失败：'+(d.msg||''),d.ok?'success':'error');if(d.ok){closeAccModal();loadAccounts();}});}
+var ACC_AVATAR = '';       // 当前编辑账号的头像 dataURL
+var ACC_AVATAR_ORIG = '';  // 载入时的原值，用于判断是否需要提交
+
+function loadAccAvatar(accountId){
+  ACC_AVATAR='';
+  ACC_AVATAR_ORIG='';
+  var img=document.getElementById('accAvatarPreview');
+  var hint=document.getElementById('accAvatarHint');
+  img.style.display='none'; img.src='';
+  hint.textContent='未设置';
+  if(!accountId) return;
+  api('avatar_get&accountId='+encodeURIComponent(accountId)).then(function(d){
+    if(d&&d.ok&&d.data&&d.data.dataUrl){
+      ACC_AVATAR=d.data.dataUrl;
+      ACC_AVATAR_ORIG=d.data.dataUrl;
+      img.src=d.data.dataUrl;
+      img.style.display='block';
+      hint.textContent='已设置';
+    }
+  }).catch(function(){});
+}
+
+function onAccAvatarPicked(){
+  var f=document.getElementById('accAvatarFile');
+  if(!f.files||!f.files.length) return;
+  var file=f.files[0];
+  if(file.size>256*1024){ toast('图片超过 256KB，请先压缩','error'); f.value=''; return; }
+  var reader=new FileReader();
+  reader.onload=function(){
+    ACC_AVATAR=String(reader.result||'');
+    var img=document.getElementById('accAvatarPreview');
+    img.src=ACC_AVATAR;
+    img.style.display='block';
+    document.getElementById('accAvatarHint').textContent='待保存';
+  };
+  reader.onerror=function(){ toast('读取图片失败','error'); };
+  reader.readAsDataURL(file);
+  f.value='';
+}
+
+function clearAccAvatar(){
+  ACC_AVATAR='';
+  var img=document.getElementById('accAvatarPreview');
+  img.style.display='none'; img.src='';
+  document.getElementById('accAvatarHint').textContent='已清除（保存后生效）';
+}
+
+function saveAccAvatar(accountId){
+  if(!accountId) return Promise.resolve();
+  if(ACC_AVATAR===ACC_AVATAR_ORIG) return Promise.resolve();   // 没改过就不提交
+  return api('avatar_upload',{method:'POST',body:{accountId:accountId,dataUrl:ACC_AVATAR}})
+    .then(function(d){
+      if(d&&d.ok){ ACC_AVATAR_ORIG=ACC_AVATAR; }
+      else if(d&&d.msg){ toast('头像：'+d.msg,'error'); }
+    })
+    .catch(function(){});
+}
+
+function saveAcc(){var api1=parseTaskLines(document.getElementById('accApi1').value);var api2=parseTaskLines(document.getElementById('accApi2').value);if(!accEditing&&!api1.length&&!api2.length){toast('请至少配置一个任务账号','error');return;}var body={accountId:document.getElementById('accId').value.trim(),remark:document.getElementById('accRemark').value.trim(),task_mode:document.getElementById('accMode').value,task_parallelism:parseInt(document.getElementById('accPara').value)||1,enabled:document.getElementById('accEnabled').checked,fp_env_enabled:document.getElementById('accFpEnv').checked,fp_env_daily_quota:parseInt(document.getElementById('accFpQuota').value)||0};if(api1.length)body.api1_accounts=api1;if(api2.length)body.api2_accounts=api2;api('decoded_ext_account_save',{method:'POST',body:body}).then(function(d){if(d.ok){var aid=(d.account&&d.account.accountId)||body.accountId;saveAccAvatar(aid).then(function(){toast('已保存','success');closeAccModal();loadAccounts();});}else{toast('失败：'+(d.msg||''),'error');}});}
 function openAccBatch(){var t=prompt('批量导入插件账号：每行一个「用户名|密码|备注」，系统会自动生成账号ID和Token');if(!t)return;api('decoded_ext_account_batch',{method:'POST',body:{batch:t}}).then(function(d){toast('已导入 '+d.count+' 个账号',d.ok?'success':'error');loadAccounts();});}
 function loadCache(){api('cache_overview').then(function(d){var items=(d.data&&d.data.items)||[];document.getElementById('cacheView').innerHTML='<table class="tbl"><thead><tr><th>路径</th><th>文件数</th><th>大小</th></tr></thead><tbody>'+items.map(function(i){return '<tr><td>'+esc(i.path)+'</td><td>'+i.files+'</td><td>'+(i.bytes/1024).toFixed(1)+' KB</td></tr>';}).join('')+'</tbody></table>';});}
 function clearCache(){Promise.all([fetch('../cx.php?act=clear_cache&json=1').then(function(r){return r.json();}),fetch('../cx2.php?act=clear_cache&json=1').then(function(r){return r.json();})]).then(function(a){toast('已清理 '+(((a[0]&&a[0].deleted)||0)+((a[1]&&a[1].deleted)||0))+' 个文件','success');loadCache();});}
