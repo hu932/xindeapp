@@ -457,12 +457,25 @@ private fun VpnCard(
                 }
             }
         } else {
+            if (state.vpnDetectLog.isNotBlank()) {
+                Text(
+                    state.vpnDetectLog,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 10.sp,
+                )
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     onClick = onVpnConnect,
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(10.dp),
                 ) { Text("连接最快节点") }
+                OutlinedButton(
+                    onClick = onVpnRecheck,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(10.dp),
+                ) { Text("重新检测", fontSize = 13.sp) }
             }
             if (state.vpnRegion.isNotBlank()) {
                 Text(

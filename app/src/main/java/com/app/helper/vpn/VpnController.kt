@@ -93,12 +93,14 @@ object VpnController {
      * 便于区分「真没装」和「装了但看不见」。
      */
     fun detectPkg(ctx: Context): String? {
-        val sb = StringBuilder()
+        // 第一轮：按已知包名精确查
+        val failLog = StringBuilder()
         for (pkg in CANDIDATE_PKGS) {
             val ok = runCatching {
                 ctx.packageManager.getPackageInfo(pkg, 0) != null
             }.getOrElse { e ->
-                sb.append(pkg).append(": ").append(e.javaClass.simpleName).append("\n")
+                failLog.append(pkg).append(": ")
+                    .append(e.javaClass.simpleName).append("\n")
                 false
             }
             if (ok) {
@@ -107,11 +109,35 @@ object VpnController {
                 return pkg
             }
         }
-        lastDetectLog = if (sb.isEmpty()) {
-            "未找到任何代理 App"
-        } else {
-            "未找到代理 App（可能已安装但未在 manifest queries 声明）\n" + sb
+
+        // 第二轮兜底：遍历已安装包，按关键词匹配。
+        // 逐个 getPackageInfo 在某些 ROM 上会因包可见性限制全部失败，
+        // 但 QUERY_ALL_PACKAGES 声明后 getInstalledPackages 仍能拿到全量。
+        val installed = runCatching {
+            ctx.packageManager.getInstalledPackages(0)
+        }.getOrElse { e ->
+            Log.w(TAG, "getInstalledPackages failed: " + e)
+            emptyList()
         }
+        val keywords = listOf("v2ray", "clash", "nekobox", "sagernet", "sing-box", "xray", "matsuri")
+        val matches = mutableListOf<String>()
+        for (pi in installed) {
+            val name = pi.packageName.lowercase()
+            if (keywords.any { name.contains(it) }) {
+                matches.add(pi.packageName)
+            }
+        }
+        if (matches.isNotEmpty()) {
+            // 优先用已知包名，其次取第一个匹配
+            val picked = matches.firstOrNull { CANDIDATE_PKGS.contains(it) } ?: matches.first()
+            lastDetectLog = "扫描命中 " + picked + "（共 " + matches.size + " 个代理类应用：" +
+                    matches.joinToString(",") + "）"
+            Log.i(TAG, lastDetectLog)
+            return picked
+        }
+
+        lastDetectLog = "未找到代理 App。已装应用 " + installed.size + " 个，逐个查询结果：\n" +
+                failLog.toString()
         Log.w(TAG, lastDetectLog)
         return null
     }
