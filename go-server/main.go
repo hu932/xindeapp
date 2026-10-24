@@ -98,6 +98,9 @@ func main() {
 		serveStatic(w, r, dp(pluginUpdateDir))
 	})
 
+	// 用户头像：直接返回图片二进制
+	mux.HandleFunc("/api/avatar", handleAvatarImage)
+
 	// 免费节点聚合：抓取 / 测速 / 排行榜
 	mux.HandleFunc("/api/vpn/nodes", handleVPNNodes)
 	mux.HandleFunc("/api/vpn/refresh", handleVPNRefresh)
@@ -229,6 +232,14 @@ func handleProxyQueryActPOST(w http.ResponseWriter, r *http.Request) bool {
 			return true
 		}
 		writeJSONOK(w, shadowAccountSave(readRawJSONBody(r)))
+		return true
+	case act == "avatar_upload":
+		key := getAuthKey(r)
+		if !verifyAuthKey(key) {
+			writeJSONOK(w, map[string]any{"ok": false, "msg": "密码错误"})
+			return true
+		}
+		writeJSONOK(w, avatarUpload(readRawJSONBody(r)))
 		return true
 	case act == "save_api1_accounts" || act == "save_api2_accounts":
 		key := getAuthKey(r)

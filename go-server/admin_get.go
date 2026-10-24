@@ -411,6 +411,12 @@ func handleProxyGET(w http.ResponseWriter, r *http.Request) {
 	case "inventory_audit":
 		handleInventoryAuditGet(w, r)
 		return
+	case "avatar_get":
+		writeJSONOK(w, avatarGet(trimStr(r.URL.Query().Get("accountId"))))
+		return
+	case "avatar_list":
+		writeJSONOK(w, avatarList())
+		return
 	case "shadow_account_get":
 		// GET 请求走这个分发器，POST 走 main.go，两处都得注册。
 		writeJSONOK(w, shadowAccountGet())

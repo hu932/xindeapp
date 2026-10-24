@@ -365,6 +365,9 @@ class ComposeMainActivity : ComponentActivity() {
                 intent ?: return
                 state.completed = intent.getIntExtra("completed", state.completed)
                 state.failed = intent.getIntExtra("failed", state.failed)
+                // TaskService 的 STATS_ACTION 带了 running，之前漏读，
+                // 导致左上角状态一直是「已停止」
+                state.autoRunning = intent.getBooleanExtra("running", state.autoRunning)
                 intent.getStringExtra("status")?.let { state.status = it }
                 intent.getStringExtra("current_task")?.let { state.currentTask = it }
             }
