@@ -12,6 +12,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
+import java.net.InetAddress
+import java.net.ServerSocket
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URL
@@ -73,6 +75,11 @@ object VpnController {
 
     /** 一个已安装应用，用于手动选择。 */
     data class AppEntry(val pkg: String, val label: String)
+
+    /** 最近一次导入订阅的结果说明。 */
+    @Volatile
+    var lastImportMessage: String = ""
+        private set
 
     /** 最近一次检测的说明，供界面显示。 */
     @Volatile
@@ -325,19 +332,75 @@ object VpnController {
      * 通过 v2rayng://install-sub 导入订阅。
      * 用 data: URI 直接内嵌内容，避免还要自建一个可供 v2rayNG 访问的 URL。
      */
+    /**
+     * 把节点推给代理 App。
+     *
+     * 不能再用 data: URI —— 一是 URL 太长（几十个节点十几 KB），
+     * 二是 v2rayNG 拿到 data: 未必会去"下载"它。
+     * 这里在 127.0.0.1 上起一个临时 HTTP 服务，把 base64 订阅挂上去，
+     * 传给代理 App 的是正常的 http://127.0.0.1:port/sub，它的下载逻辑能处理。
+     *
+     * scheme 依次尝试：不同版本 / 改版的 v2rayNG 注册的 scheme 不一样，
+     * 甚至完全不注册。全部失败时退到剪贴板 + 打开 App，让用户手动粘贴。
+     */
     fun importSubscription(ctx: Context, nodes: List<Node>): Boolean {
-        if (nodes.isEmpty()) return false
+        if (nodes.isEmpty()) {
+            lastImportMessage = "没有可导入的节点"
+            return false
+        }
+        val pkg = detectPkg(ctx) ?: TARGET_PKG
         val b64 = buildSubscription(nodes)
-        val payload = "data:application/octet-stream;base64," + Uri.encode(b64)
-        return runCatching {
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setPackage(detectPkg(ctx) ?: TARGET_PKG)
-                data = Uri.parse("v2rayng://install-sub?url=" + payload)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+        // 起本地服务
+        val port = SubServer.start(b64)
+        if (port <= 0) {
+            lastImportMessage = "本地订阅服务启动失败"
+            Log.w(TAG, lastImportMessage)
+            return false
+        }
+        val subUrl = "http://127.0.0.1:" + port + "/sub"
+        Log.i(TAG, "serving subscription at " + subUrl + " for " + pkg)
+
+        val schemes = listOf(
+            "v2rayng://install-sub",
+            "v2rayng://install-config",
+            "v2ray://install-sub",
+            "clash://install-config",
+        )
+        for (base in schemes) {
+            val ok = runCatching {
+                val i = Intent(Intent.ACTION_VIEW).apply {
+                    setPackage(pkg)
+                    data = Uri.parse(base + "?url=" + Uri.encode(subUrl))
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                ctx.startActivity(i)
+                true
+            }.onFailure { Log.w(TAG, base + " 不可用: " + it.javaClass.simpleName) }
+                .getOrDefault(false)
+            if (ok) {
+                lastImportMessage = "已提交订阅（" + base.substringBefore("://") + "）"
+                Log.i(TAG, lastImportMessage)
+                return true
             }
-            ctx.startActivity(intent)
+        }
+
+        // 全部失败：剪贴板兜底
+        val copied = runCatching {
+            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("subscription", b64))
             true
-        }.onFailure { Log.w(TAG, "importSubscription failed: $it") }.getOrDefault(false)
+        }.getOrDefault(false)
+
+        lastImportMessage = if (copied) {
+            "该应用不接受自动导入，订阅已复制到剪贴板。" +
+                    "请打开它 → 配置 → 从剪贴板导入"
+        } else {
+            "该应用不支持自动导入，请在应用内手动添加订阅：" + subUrl
+        }
+        Log.w(TAG, lastImportMessage)
+        openTargetApp(ctx)
+        return false
     }
 
     /** 启动 / 停止代理。v2rayNG 用 Tasker 广播，FlClash 用 TempActivity。 */
@@ -472,5 +535,79 @@ object VpnController {
             true
         }.onFailure { Log.w(TAG, "flclash control failed: " + it) }.getOrDefault(false)
     }
+
+
+/**
+ * 临时 HTTP 服务：把订阅内容挂到 127.0.0.1 上。
+ *
+ * 只服务一个路径 /sub，2 分钟后自动退出，端口由系统分配。
+ * 用 ServerSocket 而不是 Netty/OkHttp：只需要响应一次 GET，
+ * 引依赖不值当。
+ */
+private object SubServer {
+
+    private const val SUB_TAG = "VpnSubSrv"
+
+
+    @Volatile
+    private var server: ServerSocket? = null
+
+    @Volatile
+    var port: Int = 0
+        private set
+
+    private var body: ByteArray = ByteArray(0)
+    private var worker: Thread? = null
+
+    fun start(content: String): Int {
+        stop()
+        return runCatching {
+            body = content.toByteArray(Charsets.UTF_8)
+            val ss = ServerSocket(0, 4, InetAddress.getByName("127.0.0.1"))
+            server = ss
+            port = ss.localPort
+            worker = Thread {
+                val deadline = System.currentTimeMillis() + 120_000
+                while (System.currentTimeMillis() < deadline) {
+                    val sock = try {
+                        ss.accept()
+                    } catch (_: Exception) {
+                        break
+                    }
+                    try {
+                        sock.use { c ->
+                            // 读掉请求行，不解析
+                            val inp = c.getInputStream()
+                            val buf = ByteArray(2048)
+                            runCatching { inp.read(buf) }
+                            val out = c.getOutputStream()
+                            val head = "HTTP/1.1 200 OK\r\n" +
+                                    "Content-Type: text/plain; charset=utf-8\r\n" +
+                                    "Content-Length: " + body.size + "\r\n" +
+                                    "Connection: close\r\n\r\n"
+                            out.write(head.toByteArray(Charsets.US_ASCII))
+                            out.write(body)
+                            out.flush()
+                        }
+                    } catch (_: Exception) {
+                    }
+                }
+            }.also {
+                it.isDaemon = true
+                it.start()
+            }
+            port
+        }.onFailure {
+            Log.w(SUB_TAG, "SubServer start failed: " + it)
+        }.getOrDefault(0)
+    }
+
+    fun stop() {
+        runCatching { server?.close() }
+        server = null
+        worker = null
+        port = 0
+    }
+}
 
 }

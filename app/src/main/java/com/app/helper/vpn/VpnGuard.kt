@@ -107,7 +107,10 @@ object VpnGuard {
                         app, nodes.filter { it.raw.isNotBlank() }
                     )
                     if (!imported) {
-                        lastMessage = "导入订阅失败，检查 v2rayNG 是否已安装"
+                        lastMessage = VpnController.lastImportMessage.ifBlank {
+                            "导入订阅失败，检查代理应用是否已安装"
+                        }
+                        Log.w(TAG, lastMessage)
                         continue
                     }
                     delay(1500)
@@ -164,7 +167,11 @@ object VpnGuard {
                 return@launch
             }
             lastMessage = "导入订阅..."
-            VpnController.importSubscription(app, nodes)
+            val okImport = VpnController.importSubscription(app, nodes)
+            if (!okImport) {
+                lastMessage = VpnController.lastImportMessage.ifBlank { "导入订阅失败" }
+                Log.w(TAG, lastMessage)
+            }
             delay(1500)
             lastMessage = "启动 ${picked.region} ${picked.server}:${picked.port}"
             VpnController.setEnabled(app, true)

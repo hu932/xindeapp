@@ -429,13 +429,16 @@ class ComposeMainActivity : ComponentActivity() {
 
     private fun connectFastestVpn() {
         if (!state.vpnTargetInstalled) {
-            state.addLog("[代理] 请先安装 v2rayNG")
+            state.addLog("[代理] 请先指定代理应用")
             return
         }
         state.vpnStatus = "正在测速..."
+        // 导入结果由 VpnGuard 回填到 lastImportMessage，测速完一起显示
         VpnGuard.connectNow(this) { ok, msg ->
             state.vpnStatus = msg
             state.addLog("[代理] " + msg)
+            val imp = com.app.helper.vpn.VpnController.lastImportMessage
+            if (imp.isNotBlank()) state.addLog("[代理] " + imp)
             if (!ok && msg.contains("v2rayNG")) {
                 VpnController.openInstallPage(this)
             }
