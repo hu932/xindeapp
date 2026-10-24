@@ -65,6 +65,7 @@ fun TaskPage(
     onVpnConnect: () -> Unit,
     onInstallVpn: () -> Unit,
     onVpnRecheck: () -> Unit,
+    onVpnSwitch: () -> Unit,
 ) {
     Column(
         Modifier
@@ -77,7 +78,7 @@ fun TaskPage(
         ControlCard(state, onStartAuto, onStopAuto, onSingleTask, onTestApi, onCheckUpdate)
         DelayCard(state, onSetDelay)
         PauseCard(state, onPauseEnabled, onPauseConfig)
-        VpnCard(state, onVpnToggle, onVpnConnect, onInstallVpn, onVpnRecheck)
+        VpnCard(state, onVpnToggle, onVpnConnect, onInstallVpn, onVpnRecheck, onVpnSwitch)
         ModeCard(state, onSilentMode, onChatMode, onChatPermission)
         LogCard(state, onClearLogs)
     }
@@ -396,6 +397,7 @@ private fun VpnCard(
     onVpnConnect: () -> Unit,
     onInstallVpn: () -> Unit,
     onVpnRecheck: () -> Unit,
+    onVpnSwitch: () -> Unit,
 ) {
     SectionCard("网络代理") {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -470,12 +472,20 @@ private fun VpnCard(
                     onClick = onVpnConnect,
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(10.dp),
-                ) { Text("连接最快节点") }
-                OutlinedButton(
-                    onClick = onVpnRecheck,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
-                ) { Text("重新检测", fontSize = 13.sp) }
+                ) { Text("连接最快节点", fontSize = 13.sp) }
+                if (state.vpnAppChoices.size > 1) {
+                    OutlinedButton(
+                        onClick = onVpnSwitch,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                    ) { Text("切换应用", fontSize = 13.sp) }
+                } else {
+                    OutlinedButton(
+                        onClick = onVpnRecheck,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                    ) { Text("重新检测", fontSize = 13.sp) }
+                }
             }
             if (state.vpnRegion.isNotBlank()) {
                 Text(

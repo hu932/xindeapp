@@ -42,12 +42,33 @@ object VpnController {
      * Android 11+ 的包可见性要求 manifest 的 queries 里逐个声明，
      * 这里列出的都必须同步出现在 manifest 中，否则查不到。
      */
+    /**
+     * 可识别的代理 App，顺序即优先级。
+     *
+     * v2rayNG 必须排第一：只有它能接收推送的节点订阅，
+     * 其他 App 只能启停，掉线后无法自动换节点。
+     *
+     * 这些包名都要同步出现在 manifest 的 queries 里，
+     * 否则 Android 11+ 上 getPackageInfo 会抛 NameNotFound。
+     */
     val CANDIDATE_PKGS = listOf(
-        "com.v2ray.ang",                    // v2rayNG
+        "com.v2ray.ang",                    // v2rayNG —— 支持推节点
         "moe.nb4a",                         // NekoBox
         "io.nekohasekai.sagernet",           // SagerNet
         "com.github.kr328.clash",           // Clash Meta for Android
         "com.follow.clash",                 // FlClash
+        "com.hiddify.hiddify",              // Hiddify
+        "com.nebula.v2ray",                 // 各类改版
+    )
+
+    /**
+     * 扫描已安装包时的关键词。
+     * 覆盖常见命名的拼写变体，避免漏掉改版或分支版本。
+     */
+    private val PKG_KEYWORDS = listOf(
+        "v2ray", "v2rayng", "clash", "mihomo", "nekobox", "sagernet",
+        "sing-box", "singbox", "xray", "hysteria", "matsuri",
+        "hiddify", "karing", "husi", "sfa", "npv",
     )
 
     /** 最近一次检测的说明，供界面显示。 */
@@ -92,54 +113,104 @@ object VpnController {
      * NameNotFoundException。这里把每个候选的失败原因都记下来，
      * 便于区分「真没装」和「装了但看不见」。
      */
-    fun detectPkg(ctx: Context): String? {
-        // 第一轮：按已知包名精确查
-        val failLog = StringBuilder()
-        for (pkg in CANDIDATE_PKGS) {
-            val ok = runCatching {
-                ctx.packageManager.getPackageInfo(pkg, 0) != null
-            }.getOrElse { e ->
-                failLog.append(pkg).append(": ")
-                    .append(e.javaClass.simpleName).append("\n")
-                false
-            }
-            if (ok) {
-                lastDetectLog = "命中 " + pkg
-                Log.i(TAG, lastDetectLog)
-                return pkg
-            }
-        }
+    /** 用户手动指定的包名，空表示自动挑。 */
+    fun preferred(ctx: Context): String =
+        ctx.getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
+            .getString("preferred_pkg", "").orEmpty()
 
-        // 第二轮兜底：遍历已安装包，按关键词匹配。
-        // 逐个 getPackageInfo 在某些 ROM 上会因包可见性限制全部失败，
-        // 但 QUERY_ALL_PACKAGES 声明后 getInstalledPackages 仍能拿到全量。
+    fun setPreferred(ctx: Context, pkg: String) {
+        ctx.getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
+            .edit().putString("preferred_pkg", pkg).apply()
+    }
+
+    /** 读取 App 显示名，取不到时退回包名。 */
+    fun appLabel(ctx: Context, pkg: String): String = runCatching {
+        val pm = ctx.packageManager
+        val ai = pm.getApplicationInfo(pkg, 0)
+        pm.getApplicationLabel(ai).toString()
+    }.getOrDefault(pkg)
+
+    /**
+     * 列出所有可识别的代理 App。
+     *
+     * 排序规则：先按 [CANDIDATE_PKGS] 的顺序（v2rayNG 最前），
+     * 再按包名字母序排那些只在关键词里命中的未知改版。
+     *
+     * 这里必须用 getInstalledPackages 而不是逐个 getPackageInfo：
+     * 部分 ROM 对 queries 声明处理不一致，逐个查会全部抛
+     * NameNotFoundException，而声明 QUERY_ALL_PACKAGES 后
+     * getInstalledPackages 仍能拿到全量列表。
+     */
+    fun detectAll(ctx: Context): List<String> {
         val installed = runCatching {
             ctx.packageManager.getInstalledPackages(0)
         }.getOrElse { e ->
             Log.w(TAG, "getInstalledPackages failed: " + e)
             emptyList()
         }
-        val keywords = listOf("v2ray", "clash", "nekobox", "sagernet", "sing-box", "xray", "matsuri")
-        val matches = mutableListOf<String>()
-        for (pi in installed) {
-            val name = pi.packageName.lowercase()
-            if (keywords.any { name.contains(it) }) {
-                matches.add(pi.packageName)
-            }
+        if (installed.isEmpty()) return emptyList()
+
+        val names = installed.map { it.packageName }
+        val lowered = names.associateWith { it.lowercase() }
+
+        // 关键词命中
+        val hit = names.filter { pkg ->
+            val low = lowered[pkg] ?: return@filter false
+            PKG_KEYWORDS.any { low.contains(it) }
+        }.toMutableSet()
+
+        // 已知包名即使不含关键词也要算进来（比如 com.v2ray.ang 含 v2ray，
+        // 但 com.follow.clash 也可能出现在这里作双保险）
+        for (pkg in CANDIDATE_PKGS) {
+            if (names.contains(pkg)) hit.add(pkg)
         }
-        if (matches.isNotEmpty()) {
-            // 优先用已知包名，其次取第一个匹配
-            val picked = matches.firstOrNull { CANDIDATE_PKGS.contains(it) } ?: matches.first()
-            lastDetectLog = "扫描命中 " + picked + "（共 " + matches.size + " 个代理类应用：" +
-                    matches.joinToString(",") + "）"
-            Log.i(TAG, lastDetectLog)
-            return picked
+        if (hit.isEmpty()) return emptyList()
+
+        // 排序：已知包名按 CANDIDATE_PKGS 下标，未知的排后面按字母序
+        return hit.sortedWith(compareBy(
+            { pkg ->
+                val idx = CANDIDATE_PKGS.indexOf(pkg)
+                if (idx >= 0) idx else Int.MAX_VALUE
+            },
+            { it }
+        ))
+    }
+
+    /**
+     * 选出实际使用的代理 App。
+     *
+     * 优先级：用户手动指定 > [CANDIDATE_PKGS] 顺序（v2rayNG 优先）。
+     */
+    fun detectPkg(ctx: Context): String? {
+        val all = detectAll(ctx)
+        if (all.isEmpty()) {
+            lastDetectLog = "未找到代理 App"
+            Log.w(TAG, lastDetectLog)
+            return null
         }
 
-        lastDetectLog = "未找到代理 App。已装应用 " + installed.size + " 个，逐个查询结果：\n" +
-                failLog.toString()
-        Log.w(TAG, lastDetectLog)
-        return null
+        // 手动指定优先
+        val pref = preferred(ctx)
+        if (pref.isNotBlank()) {
+            if (all.contains(pref)) {
+                lastDetectLog = "使用指定应用 " + appLabel(ctx, pref) + "（" + pref + "）"
+                Log.i(TAG, lastDetectLog)
+                return pref
+            }
+            // 指定过但已卸载，清掉
+            setPreferred(ctx, "")
+        }
+
+        val picked = all.first()
+        val labels = all.joinToString("、") { appLabel(ctx, it) + "(" + it + ")" }
+        lastDetectLog = if (all.size > 1) {
+            "使用 " + appLabel(ctx, picked) + "，共检测到 " +
+                    all.size + " 个代理应用：" + labels
+        } else {
+            "检测到 " + appLabel(ctx, picked) + "（" + picked + "）"
+        }
+        Log.i(TAG, lastDetectLog)
+        return picked
     }
 
     /**

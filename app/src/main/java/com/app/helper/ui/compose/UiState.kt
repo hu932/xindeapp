@@ -68,6 +68,8 @@ class UiState {
     var vpnDownloadPct by mutableIntStateOf(-1)   // -1 表示未在下载
     var vpnInstalling by mutableStateOf(false)
     var vpnDetectLog by mutableStateOf("")
+    /** 检测到的代理 App 包名列表，多于一个时界面给切换入口。 */
+    val vpnAppChoices = mutableStateListOf<String>()
 
     // ---- 指纹 ----
     var fpCount by mutableIntStateOf(0)

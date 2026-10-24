@@ -94,6 +94,7 @@ class ComposeMainActivity : ComponentActivity() {
                 onVpnConnect = { connectFastestVpn() },
                 onInstallVpn = { installVpnApp() },
                 onVpnRecheck = { recheckVpn() },
+                onVpnSwitch = { switchVpn() },
             )
         }
     }
@@ -387,6 +388,9 @@ class ComposeMainActivity : ComponentActivity() {
     // ---------------- VPN ----------------
 
     private fun refreshVpnState() {
+        val all = VpnController.detectAll(this)
+        state.vpnAppChoices.clear()
+        state.vpnAppChoices.addAll(all)
         val pkg = VpnController.detectPkg(this)
         state.vpnTargetInstalled = pkg != null
         state.vpnDetectLog = VpnController.lastDetectLog
@@ -481,6 +485,9 @@ class ComposeMainActivity : ComponentActivity() {
 
     /** 重新检测代理 App。用户装完返回或手动点「重新检测」时调用。 */
     private fun recheckVpn() {
+        val all = VpnController.detectAll(this)
+        state.vpnAppChoices.clear()
+        state.vpnAppChoices.addAll(all)
         val pkg = VpnController.detectPkg(this)
         state.vpnTargetInstalled = pkg != null
         state.vpnDetectLog = VpnController.lastDetectLog
@@ -508,6 +515,35 @@ class ComposeMainActivity : ComponentActivity() {
             val bmp = AvatarLoader.load(this@ComposeMainActivity, accountId, force)
             state.avatarBitmap = bmp
         }
+    }
+
+
+    /**
+     * 在检测到的代理 App 之间循环切换。
+     *
+     * 只有 v2rayNG 能接收推送的节点订阅，所以想用「掉线自动换节点」
+     * 就必须让它排在最前；这里给用户手动兜底，装了好几个时自己挑。
+     */
+    private fun switchVpn() {
+        val all = VpnController.detectAll(this)
+        if (all.isEmpty()) {
+            state.addLog("[代理] 没有可切换的应用")
+            return
+        }
+        if (all.size == 1) {
+            state.addLog("[代理] 只检测到 " + all.first())
+            return
+        }
+        val current = VpnController.detectPkg(this)
+        val idx = all.indexOf(current)
+        val next = all[(idx + 1) % all.size]
+        VpnController.setPreferred(this, next)
+        val label = VpnController.appLabel(this, next)
+        state.addLog("[代理] 已切换为 " + label + "（" + next + "）")
+        if (!VpnController.supportsNodePush(next)) {
+            state.addLog("[代理] 注意：" + label + " 不支持推送节点，掉线只能重连")
+        }
+        refreshVpnState()
     }
 
 }
