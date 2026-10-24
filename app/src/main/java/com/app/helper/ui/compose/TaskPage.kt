@@ -66,6 +66,8 @@ fun TaskPage(
     onInstallVpn: () -> Unit,
     onVpnRecheck: () -> Unit,
     onVpnSwitch: () -> Unit,
+    onVpnPickManually: () -> Unit,
+    onVpnPicked: (String) -> Unit,
 ) {
     Column(
         Modifier
@@ -78,7 +80,7 @@ fun TaskPage(
         ControlCard(state, onStartAuto, onStopAuto, onSingleTask, onTestApi, onCheckUpdate)
         DelayCard(state, onSetDelay)
         PauseCard(state, onPauseEnabled, onPauseConfig)
-        VpnCard(state, onVpnToggle, onVpnConnect, onInstallVpn, onVpnRecheck, onVpnSwitch)
+        VpnCard(state, onVpnToggle, onVpnConnect, onInstallVpn, onVpnRecheck, onVpnSwitch, onVpnPickManually)
         ModeCard(state, onSilentMode, onChatMode, onChatPermission)
         LogCard(state, onClearLogs)
     }
@@ -398,6 +400,7 @@ private fun VpnCard(
     onInstallVpn: () -> Unit,
     onVpnRecheck: () -> Unit,
     onVpnSwitch: () -> Unit,
+    onVpnPickManually: () -> Unit,
 ) {
     SectionCard("网络代理") {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -448,6 +451,13 @@ private fun VpnCard(
                     ) {
                         Text("重新检测", fontSize = 13.sp)
                     }
+                }
+                OutlinedButton(
+                    onClick = onVpnPickManually,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                ) {
+                    Text("手动选择已装应用", fontSize = 13.sp)
                 }
                 if (state.vpnDetectLog.isNotBlank()) {
                     Text(

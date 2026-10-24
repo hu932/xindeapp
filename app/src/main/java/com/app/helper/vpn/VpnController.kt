@@ -71,6 +71,9 @@ object VpnController {
         "hiddify", "karing", "husi", "sfa", "npv",
     )
 
+    /** 一个已安装应用，用于手动选择。 */
+    data class AppEntry(val pkg: String, val label: String)
+
     /** 最近一次检测的说明，供界面显示。 */
     @Volatile
     var lastDetectLog: String = ""
@@ -142,29 +145,46 @@ object VpnController {
      * getInstalledPackages 仍能拿到全量列表。
      */
     fun detectAll(ctx: Context): List<String> {
-        val installed = runCatching {
-            ctx.packageManager.getInstalledPackages(0)
-        }.getOrElse { e ->
-            Log.w(TAG, "getInstalledPackages failed: " + e)
-            emptyList()
+        val pm = ctx.packageManager
+
+        // 收集所有能看到的包名。两条路都试：
+        //   1. getInstalledPackages —— 声明 QUERY_ALL_PACKAGES 后通常可用
+        //   2. queryIntentActivities(MAIN/LAUNCHER) —— 部分 ROM 只放行这条路
+        val names = linkedSetOf<String>()
+
+        runCatching {
+            pm.getInstalledPackages(0).forEach { names.add(it.packageName) }
+        }.onFailure { Log.w(TAG, "getInstalledPackages failed: " + it) }
+
+        runCatching {
+            val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            pm.queryIntentActivities(intent, 0).forEach {
+                it.activityInfo?.packageName?.let { pkg -> names.add(pkg) }
+            }
+        }.onFailure { Log.w(TAG, "queryIntentActivities failed: " + it) }
+
+        if (names.isEmpty()) {
+            Log.w(TAG, "no packages visible at all")
+            return emptyList()
         }
-        if (installed.isEmpty()) return emptyList()
 
-        val names = installed.map { it.packageName }
-        val lowered = names.associateWith { it.lowercase() }
-
-        // 关键词命中
+        // 关键词命中：包名 或 显示名 任一命中都算。
+        // 有些改版把包名改成 com.xxx.client，但应用名仍叫 v2rayNG。
         val hit = names.filter { pkg ->
-            val low = lowered[pkg] ?: return@filter false
-            PKG_KEYWORDS.any { low.contains(it) }
+            val low = pkg.lowercase()
+            if (PKG_KEYWORDS.any { low.contains(it) }) return@filter true
+            val label = appLabel(ctx, pkg).lowercase()
+            PKG_KEYWORDS.any { label.contains(it) }
         }.toMutableSet()
 
-        // 已知包名即使不含关键词也要算进来（比如 com.v2ray.ang 含 v2ray，
-        // 但 com.follow.clash 也可能出现在这里作双保险）
+        // 已知包名兜底
         for (pkg in CANDIDATE_PKGS) {
             if (names.contains(pkg)) hit.add(pkg)
         }
-        if (hit.isEmpty()) return emptyList()
+        if (hit.isEmpty()) {
+            Log.w(TAG, "scanned ${names.size} packages, none matched")
+            return emptyList()
+        }
 
         // 排序：已知包名按 CANDIDATE_PKGS 下标，未知的排后面按字母序
         return hit.sortedWith(compareBy(
@@ -174,6 +194,40 @@ object VpnController {
             },
             { it }
         ))
+    }
+
+    /**
+     * 列出所有可启动的应用（包名 + 显示名），用于手动指定代理 App。
+     *
+     * 检测失败时这是最终的兜底手段：不猜包名，让用户自己点。
+     * 排除本应用自己，按显示名排序。
+     */
+    fun listAllApps(ctx: Context): List<AppEntry> {
+        val pm = ctx.packageManager
+        val seen = linkedSetOf<String>()
+        val out = mutableListOf<AppEntry>()
+
+        runCatching {
+            val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            pm.queryIntentActivities(intent, 0).forEach { ri ->
+                val pkg = ri.activityInfo?.packageName ?: return@forEach
+                if (pkg == ctx.packageName) return@forEach
+                if (!seen.add(pkg)) return@forEach
+                out.add(AppEntry(pkg, appLabel(ctx, pkg)))
+            }
+        }.onFailure { Log.w(TAG, "listAllApps failed: " + it) }
+
+        // 有些应用没有 launcher 图标，用 getInstalledPackages 补一遍
+        runCatching {
+            pm.getInstalledPackages(0).forEach { pi ->
+                val pkg = pi.packageName
+                if (pkg == ctx.packageName) return@forEach
+                if (!seen.add(pkg)) return@forEach
+                out.add(AppEntry(pkg, appLabel(ctx, pkg)))
+            }
+        }
+
+        return out.sortedBy { it.label.lowercase() }
     }
 
     /**
@@ -277,7 +331,7 @@ object VpnController {
         val payload = "data:application/octet-stream;base64," + Uri.encode(b64)
         return runCatching {
             val intent = Intent(Intent.ACTION_VIEW).apply {
-                setPackage(TARGET_PKG)
+                setPackage(detectPkg(ctx) ?: TARGET_PKG)
                 data = Uri.parse("v2rayng://install-sub?url=" + payload)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
@@ -288,7 +342,9 @@ object VpnController {
 
     /** 启动 / 停止代理。v2rayNG 用 Tasker 广播，FlClash 用 TempActivity。 */
     fun setEnabled(ctx: Context, enabled: Boolean, guid: String = DEFAULT_GUID): Boolean {
-        val pkg = detectPkg(ctx)
+        // 用实际选中的包名。之前写死 TARGET_PKG，用户手动指定其他包名
+        // （比如改版 v2rayNG）时会广播到错误的目标，代理毫无反应。
+        val pkg = detectPkg(ctx) ?: TARGET_PKG
         if (pkg == FLCLASH_PKG) {
             return setFlClash(ctx, enabled)
         }
@@ -298,13 +354,13 @@ object VpnController {
                 putString(EXTRA_GUID, guid)
             }
             val intent = Intent(ACTION_FIRE_SETTING).apply {
-                setPackage(TARGET_PKG)
+                setPackage(pkg)
                 putExtra(EXTRA_BUNDLE, bundle)
             }
             ctx.sendBroadcast(intent)
-            Log.i(TAG, "setEnabled enabled=$enabled guid=$guid")
+            Log.i(TAG, "setEnabled pkg=" + pkg + " enabled=" + enabled)
             true
-        }.onFailure { Log.w(TAG, "setEnabled failed: $it") }.getOrDefault(false)
+        }.onFailure { Log.w(TAG, "setEnabled failed: " + it) }.getOrDefault(false)
     }
 
     /**

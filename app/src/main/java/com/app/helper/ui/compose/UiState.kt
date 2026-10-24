@@ -70,6 +70,12 @@ class UiState {
     var vpnDetectLog by mutableStateOf("")
     /** 检测到的代理 App 包名列表，多于一个时界面给切换入口。 */
     val vpnAppChoices = mutableStateListOf<String>()
+    /** 手动选择弹窗是否显示。 */
+    var vpnPickerVisible by mutableStateOf(false)
+    /** 当前选中的代理 App 包名，空表示未选中。 */
+    var vpnCurrentPkg by mutableStateOf("")
+    /** 弹窗里列出的已装应用。 */
+    var vpnPickerApps by mutableStateOf<List<com.app.helper.vpn.VpnController.AppEntry>>(emptyList())
 
     // ---- 指纹 ----
     var fpCount by mutableIntStateOf(0)

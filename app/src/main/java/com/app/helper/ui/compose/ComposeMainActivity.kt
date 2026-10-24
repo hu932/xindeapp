@@ -95,6 +95,8 @@ class ComposeMainActivity : ComponentActivity() {
                 onInstallVpn = { installVpnApp() },
                 onVpnRecheck = { recheckVpn() },
                 onVpnSwitch = { switchVpn() },
+                onVpnPickManually = { openVpnPicker() },
+                onVpnPicked = { pkg -> applyVpnPick(pkg) },
             )
         }
     }
@@ -393,6 +395,7 @@ class ComposeMainActivity : ComponentActivity() {
         state.vpnAppChoices.addAll(all)
         val pkg = VpnController.detectPkg(this)
         state.vpnTargetInstalled = pkg != null
+        state.vpnCurrentPkg = pkg ?: ""
         state.vpnDetectLog = VpnController.lastDetectLog
         state.vpnEnabled = VpnController.isAutoEnabled(this)
         state.vpnRegion = VpnController.region(this)
@@ -541,6 +544,28 @@ class ComposeMainActivity : ComponentActivity() {
         val label = VpnController.appLabel(this, next)
         state.addLog("[代理] 已切换为 " + label + "（" + next + "）")
         if (!VpnController.supportsNodePush(next)) {
+            state.addLog("[代理] 注意：" + label + " 不支持推送节点，掉线只能重连")
+        }
+        refreshVpnState()
+    }
+
+
+    /** 打开手动选择代理应用的弹窗。 */
+    private fun openVpnPicker() {
+        val apps = VpnController.listAllApps(this)
+        state.vpnPickerApps = apps
+        state.vpnPickerVisible = true
+        if (apps.isEmpty()) {
+            state.addLog("[代理] 读取不到已装应用列表，系统可能限制了应用可见性")
+        }
+    }
+
+    /** 用户手动选定了代理应用。 */
+    private fun applyVpnPick(pkg: String) {
+        VpnController.setPreferred(this, pkg)
+        val label = VpnController.appLabel(this, pkg)
+        state.addLog("[代理] 已指定 " + label + "（" + pkg + "）")
+        if (!VpnController.supportsNodePush(pkg)) {
             state.addLog("[代理] 注意：" + label + " 不支持推送节点，掉线只能重连")
         }
         refreshVpnState()

@@ -66,6 +66,8 @@ fun HelperApp(
     onInstallVpn: () -> Unit,
     onVpnRecheck: () -> Unit,
     onVpnSwitch: () -> Unit,
+    onVpnPickManually: () -> Unit,
+    onVpnPicked: (String) -> Unit,
 ) {
     HelperTheme {
         Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
@@ -93,6 +95,8 @@ fun HelperApp(
                             onInstallVpn = onInstallVpn,
                             onVpnRecheck = onVpnRecheck,
                             onVpnSwitch = onVpnSwitch,
+                            onVpnPickManually = onVpnPickManually,
+                            onVpnPicked = onVpnPicked,
                         )
                         else -> EnvPage(
                             state = state,
@@ -102,10 +106,22 @@ fun HelperApp(
                         )
                     }
                 }
+                if (state.vpnPickerVisible) {
+                    VpnPickerDialog(
+                        apps = state.vpnPickerApps,
+                        currentPkg = state.vpnCurrentPkg,
+                        onPick = { pkg ->
+                            state.vpnPickerVisible = false
+                            onVpnPicked(pkg)
+                        },
+                        onDismiss = { state.vpnPickerVisible = false },
+                    )
+                }
             }
         }
     }
 }
+
 
 @Composable
 private fun TopBar(state: UiState, onLogout: () -> Unit) {
