@@ -1,5 +1,6 @@
 package com.app.helper.ui.compose
 
+import android.graphics.Bitmap
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -13,6 +14,8 @@ class UiState {
 
     // ---- 账号 ----
     var username by mutableStateOf("")
+    /** 顶栏头像，null 时显示占位图标。 */
+    var avatarBitmap by mutableStateOf<Bitmap?>(null)
     var loggedIn by mutableStateOf(false)
 
     // ---- 页签 ----

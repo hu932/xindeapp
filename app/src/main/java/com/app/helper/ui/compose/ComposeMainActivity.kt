@@ -21,6 +21,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.app.helper.network.ApiService
 import com.app.helper.service.TaskService
+import com.app.helper.util.AvatarLoader
 import com.app.helper.util.DelayPrefs
 import com.app.helper.util.FingerprintManager
 import com.app.helper.util.TokenManager
@@ -59,6 +60,7 @@ class ComposeMainActivity : ComponentActivity() {
 
         requestPermissions()
         loadPrefs()
+        loadAvatar()
         refreshVpnState()
         registerReceivers()
         refreshFingerprints()
@@ -99,6 +101,7 @@ class ComposeMainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         state.chatPermissionOk = isAccessibilityEnabled()
+        loadAvatar()
         refreshVpnState()
         refreshFingerprints()
     }
@@ -335,6 +338,8 @@ class ComposeMainActivity : ComponentActivity() {
     }
 
     private fun doLogout() {
+        AvatarLoader.clearAll(this)
+        state.avatarBitmap = null
         TokenManager.logout()
         startActivity(Intent(this, com.app.helper.ui.compose.ComposeLoginActivity::class.java))
         finish()
@@ -483,6 +488,25 @@ class ComposeMainActivity : ComponentActivity() {
             state.addLog("[代理] 检测到 " + pkg)
         } else {
             state.addLog("[代理] 未检测到代理 App")
+        }
+    }
+
+
+    /**
+     * 加载顶栏头像。
+     *
+     * 服务端没配置头像时接口返回 404，AvatarLoader 会返回 null，
+     * 顶栏自动回落到默认人像图标，不需要额外判断。
+     */
+    private fun loadAvatar(force: Boolean = false) {
+        val accountId = TokenManager.getUsername()
+        if (accountId.isBlank()) {
+            state.avatarBitmap = null
+            return
+        }
+        lifecycleScope.launch {
+            val bmp = AvatarLoader.load(this@ComposeMainActivity, accountId, force)
+            state.avatarBitmap = bmp
         }
     }
 
