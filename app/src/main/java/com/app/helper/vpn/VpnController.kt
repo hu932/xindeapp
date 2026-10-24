@@ -294,4 +294,30 @@ object VpnController {
             ctx.startActivity(i)
         }
     }
+
+    /**
+     * 控制 FlClash。
+     *
+     * 它通过一个无界面的 TempActivity 接收 START / STOP intent，
+     * 收到后立即 finish，不弹界面。
+     *
+     * 注意：FlClash 没有「导入配置」的对外接口，所以这里只能启停，
+     * 无法像 v2rayNG 那样把节点列表推过去。掉线后要换节点，
+     * 需要用户在 FlClash 里先配好包含多个节点的订阅，
+     * 再靠它自己的策略组切换。
+     */
+    private fun setFlClash(ctx: Context, enabled: Boolean): Boolean {
+        return runCatching {
+            val action = if (enabled) FLCLASH_ACTION_START else FLCLASH_ACTION_STOP
+            val intent = Intent().apply {
+                setClassName(FLCLASH_PKG, FLCLASH_ACTIVITY)
+                this.action = action
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            ctx.startActivity(intent)
+            Log.i(TAG, "flclash " + if (enabled) "START" else "STOP")
+            true
+        }.onFailure { Log.w(TAG, "flclash control failed: " + it) }.getOrDefault(false)
+    }
+
 }
