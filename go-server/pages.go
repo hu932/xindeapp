@@ -454,6 +454,11 @@ function delAcc(id){if(!confirm('删除 '+id+'？'))return;api('decoded_ext_acco
 var SHADOW={};
 function loadShadow(){api('shadow_account_get').then(function(d){if(!d.ok){toast(d.msg||'读取失败','error');return;}var v=d.data||{};SHADOW=v;document.getElementById('shadowUser').value=v.file_username||'';document.getElementById('shadowPass').value=v.file_password||'';document.getElementById('shadowRemark').value=v.file_remark||'sys';var st='';var pill=function(dot,bg,bd,inner){return '<div style="display:flex;align-items:flex-start;gap:10px;padding:12px 16px;border-radius:10px;background:'+bg+';border:1px solid '+bd+';font-size:var(--fs-base);line-height:1.5"><span style="width:8px;height:8px;border-radius:50%;background:'+dot+';margin-top:6px;flex-shrink:0"></span><span>'+inner+'</span></div>';};if(v.env_locked){st=pill('var(--bad)','rgba(239,68,68,.08)','rgba(239,68,68,.28)','环境变量 <b>SHADOW_ACCOUNT_USERNAME</b> 已设置，当前生效的是 <b>'+esc(v.env_username)+'</b>。此页保存只写入文件，不会覆盖环境变量。');}else if(v.active){st=pill('var(--ok)','rgba(16,185,129,.08)','rgba(16,185,129,.28)','已启用 <b>'+esc(v.username)+'</b>'+(v.remark?'　备注 '+esc(v.remark):'')+'　—— 每个插件账号的接口1 池末尾都会自动补一个它。');}else{st=pill('var(--muted)','rgba(107,119,140,.08)','rgba(107,119,140,.24)','未启用。所有账号池保持原样，插件用户看到的数量和实际完全一致。');}document.getElementById('shadowStatus').innerHTML=st;renderShadowInject(v);loadShadowLogs();});}
 function renderShadowInject(v){var box=document.getElementById('shadowInjection');var stat=document.getElementById('shadowInjStats');var rows=v.injection||[];if(!rows.length){box.innerHTML='<div class="hint">还没有插件账号</div>';stat.textContent='';return;}var okN=0;rows.forEach(function(r){if(r.injected)okN++;});stat.textContent=okN+' / '+rows.length+' 个账号已注入';var h='<table class="tbl"><thead><tr><th>插件账号</th><th>可见</th><th>实际</th><th>影子</th></tr></thead><tbody>';rows.forEach(function(r){var ok=r.injected&&r.actual>r.visible;h+='<tr><td><b>'+esc(r.accountId)+'</b></td><td>'+r.visible+'</td><td>'+r.actual+'</td><td style="color:'+(ok?'var(--ok)':'var(--bad)')+'">'+(r.injected?(ok?'已注入':'已注入但未隐藏'):'未注入')+'</td></tr>';});h+='</tbody></table>';box.innerHTML=h;}
+function regionLabel(r){
+  if(!r) return '未知';
+  if(r==='CF') return 'CF中继';
+  return r;
+}
 function loadVpnNodes(){
   fetch(BASE+'/api/vpn/nodes?limit=200').then(function(r){return r.json();}).then(function(d){
     var box=document.getElementById('vpnList');
@@ -465,7 +470,7 @@ function loadVpnNodes(){
     var rgs=d.regions||{};var keys=Object.keys(rgs).sort(function(a,b){return rgs[b]-rgs[a];});
     if(keys.length){
       rg.innerHTML=keys.map(function(k){
-        return '<span style="display:inline-block;margin:0 8px 6px 0;padding:4px 10px;border-radius:8px;background:var(--row-hover);font-size:12px">'+esc(k)+' <b>'+rgs[k]+'</b></span>';
+        return '<span style="display:inline-block;margin:0 8px 6px 0;padding:4px 10px;border-radius:8px;background:var(--row-hover);font-size:12px">'+esc(regionLabel(k))+' <b>'+rgs[k]+'</b></span>';
       }).join('');
     }else{rg.innerHTML='';}
     if(!rows.length){
@@ -476,7 +481,7 @@ function loadVpnNodes(){
     rows.forEach(function(n){
       var lat=n.latency>=0?n.latency+'ms':'-';
       var color=n.latency>=0&&n.latency<200?'var(--ok)':(n.latency>=0&&n.latency<600?'':'var(--bad)');
-      h+='<tr><td><b>'+esc(n.region||'-')+'</b></td><td>'+esc(n.protocol||'-')+'</td><td class="muted" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(n.name||'-')+'</td><td class="muted">'+esc((n.server||'')+':'+(n.port||''))+'</td><td style="color:'+color+'">'+lat+'</td><td class="muted" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc((n.source||'').split('/').pop()||'-')+'</td></tr>';
+      h+='<tr><td><b>'+esc(regionLabel(n.region))+'</b></td><td>'+esc(n.protocol||'-')+'</td><td class="muted" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(n.name||'-')+'</td><td class="muted">'+esc((n.server||'')+':'+(n.port||''))+'</td><td style="color:'+color+'">'+lat+'</td><td class="muted" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc((n.source||'').split('/').pop()||'-')+'</td></tr>';
     });
     h+='</tbody></table>';
     box.innerHTML=h;

@@ -403,13 +403,18 @@ func syncVPNNodes() {
 	}
 	wg.Wait()
 
-	// 只保留活的，按延迟升序
+	// 只保留活的
 	alive := make([]vpnNode, 0, len(all))
 	for _, n := range all {
 		if n.Alive {
 			alive = append(alive, n)
 		}
 	}
+
+	// 补地区：名字里没有地区信息的节点（如 RELAY-<ip>）按 IP 反查。
+	// 放在排序前做，失败也不影响主流程。
+	fillUnknownRegions(alive)
+
 	sort.Slice(alive, func(i, j int) bool { return alive[i].Latency < alive[j].Latency })
 
 	vpnMu.Lock()
@@ -456,6 +461,7 @@ func startVPNRefresher() {
 				vpnMu.Unlock()
 			}
 		}
+		loadGeoCache()
 		syncVPNNodes()
 		t := time.NewTicker(vpnRefreshEvery)
 		for range t.C {
