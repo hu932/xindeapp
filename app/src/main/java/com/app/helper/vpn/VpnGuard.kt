@@ -100,13 +100,24 @@ object VpnGuard {
                 lastMessage = "切换到 ${next.region} ${next.server}:${next.port}"
                 Log.i(TAG, "switching to $key (${next.protocol})")
 
-                // 先把可用节点打包成订阅导入，再启动
-                val imported = VpnController.importSubscription(app, nodes.filter { it.raw.isNotBlank() })
-                if (!imported) {
-                    lastMessage = "导入订阅失败，检查 v2rayNG 是否已安装"
-                    continue
+                // 只有 v2rayNG 能接收节点订阅；其他 App 只能重启现有配置
+                val pkg = VpnController.detectPkg(app)
+                if (VpnController.supportsNodePush(pkg)) {
+                    val imported = VpnController.importSubscription(
+                        app, nodes.filter { it.raw.isNotBlank() }
+                    )
+                    if (!imported) {
+                        lastMessage = "导入订阅失败，检查 v2rayNG 是否已安装"
+                        continue
+                    }
+                    delay(1500)
+                } else {
+                    // FlClash 等没有推配置接口：先断开再启动，
+                    // 让它在已有订阅里按策略组重新选路
+                    lastMessage = "应用不支持推送节点，重启代理以重选线路"
+                    VpnController.setEnabled(app, false)
+                    delay(1200)
                 }
-                delay(1500)   // 给 v2rayNG 时间处理导入
                 VpnController.setEnabled(app, true)
                 current = next
                 delay(3000)

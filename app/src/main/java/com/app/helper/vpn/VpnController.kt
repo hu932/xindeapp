@@ -47,6 +47,7 @@ object VpnController {
         "moe.nb4a",                         // NekoBox
         "io.nekohasekai.sagernet",           // SagerNet
         "com.github.kr328.clash",           // Clash Meta for Android
+        "com.follow.clash",                 // FlClash
     )
 
     /** 最近一次检测的说明，供界面显示。 */
@@ -60,6 +61,12 @@ object VpnController {
     private const val EXTRA_SWITCH = "tasker_extra_bundle_switch"
     private const val EXTRA_GUID = "tasker_extra_bundle_guid"
     private const val DEFAULT_GUID = "Default"
+
+    /** FlClash：靠 TempActivity 收 intent，没有推配置的接口。 */
+    const val FLCLASH_PKG = "com.follow.clash"
+    private const val FLCLASH_ACTIVITY = "com.follow.clash.TempActivity"
+    private const val FLCLASH_ACTION_START = "com.follow.clash.action.START"
+    private const val FLCLASH_ACTION_STOP = "com.follow.clash.action.STOP"
 
     /** 探测用的目标，能被墙外正常访问即可。 */
     private const val PROBE_HOST = "www.gstatic.com"
@@ -182,8 +189,12 @@ object VpnController {
         }.onFailure { Log.w(TAG, "importSubscription failed: $it") }.getOrDefault(false)
     }
 
-    /** 用 Tasker 协议启动 / 停止 v2rayNG。 */
+    /** 启动 / 停止代理。v2rayNG 用 Tasker 广播，FlClash 用 TempActivity。 */
     fun setEnabled(ctx: Context, enabled: Boolean, guid: String = DEFAULT_GUID): Boolean {
+        val pkg = detectPkg(ctx)
+        if (pkg == FLCLASH_PKG) {
+            return setFlClash(ctx, enabled)
+        }
         return runCatching {
             val bundle = Bundle().apply {
                 putBoolean(EXTRA_SWITCH, enabled)
@@ -230,6 +241,9 @@ object VpnController {
             }
             null
         }
+
+    /** 该 App 是否支持推送节点（决定能否做自动切换）。 */
+    fun supportsNodePush(pkg: String?): Boolean = pkg == TARGET_PKG
 
     /** 记录上次使用的节点，便于掉线时跳过。 */
     fun rememberLast(ctx: Context, key: String) {

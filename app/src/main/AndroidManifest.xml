@@ -26,6 +26,7 @@
         <package android:name="io.nekohasekai.sagernet" />
         <package android:name="moe.nb4a" />
         <package android:name="com.github.kr328.clash" />
+        <package android:name="com.follow.clash" />
         <package android:name="com.nebula.v2ray" />
         <!-- 允许查询所有能处理「安装 APK」的应用，用于拉起系统安装器 -->
         <intent>
