@@ -1,5 +1,6 @@
 package com.app.helper.ui.compose
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -47,6 +48,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun EnvPage(
     state: UiState,
@@ -215,6 +217,7 @@ fun EnvPage(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun FpRow(
     fp: FingerprintManagerFp,
