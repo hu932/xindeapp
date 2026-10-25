@@ -80,6 +80,8 @@ class UiState {
     // ---- 指纹 ----
     var fpCount by mutableIntStateOf(0)
     val fpList = mutableStateListOf<FingerprintManager.FpFileInfo>()
+    /** 环境页多选删除：选中的指纹文件名。 */
+    val fpSelected = mutableStateListOf<String>()
 
     /** 当前延时是否匹配某个预设区间，用于高亮按钮。 */
     fun isDelay(min: Long, max: Long): Boolean =

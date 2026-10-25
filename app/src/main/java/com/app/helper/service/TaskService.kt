@@ -47,6 +47,13 @@ class TaskService : android.app.Service() {
         private const val PREF_NAME = "task_config"
         var isRunning = false
             private set
+        // 界面以此为准：广播可能被系统拦掉，轮询这两个值才准
+        @Volatile
+        var autoRunningSnapshot = false
+            private set
+        @Volatile
+        var statusSnapshot = ""
+            private set
     }
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -196,6 +203,7 @@ class TaskService : android.app.Service() {
         super.onDestroy()
         isRunning = false
         isAutoRunning = false
+        autoRunningSnapshot = false
         serviceScope.cancel()
         countdownJob?.cancel()
         heartbeatJob?.cancel()
@@ -355,10 +363,25 @@ class TaskService : android.app.Service() {
         removeFloatWindow()
         createFloatWindow(showWelcome = false)
         applyStatusToViews(compactStatusMessage.ifEmpty { "点击【一键做任务】开始" })
+        // 切换小窗/完整窗口后按钮是新建的，默认文案是「一键做任务」。
+        // 如果此时正在跑自动，必须改回「停止自动」，否则用户点了会以为在开始
+        // 实际却是停止，状态和文案完全反了。
+        handler.post {
+            if (isAutoRunning) {
+                tvAction?.text = "停止自动"
+                tvAction?.setBackgroundResource(R.drawable.bg_float_action_stop)
+            } else {
+                tvAction?.text = "一键做任务"
+                tvAction?.setBackgroundResource(R.drawable.bg_float_action)
+            }
+        }
     }
 
     private fun applyStatusToViews(compactMessage: String) {
         compactStatusMessage = compactMessage
+        // 所有状态变化都会经过这里，快照在这里更新最可靠
+        autoRunningSnapshot = isAutoRunning
+        statusSnapshot = compactMessage
         statusMessage = "$compactMessage\n下发ID：${TokenManager.getUsername()} 今日:$uploadCount"
         handler.post {
             if (!isCollapsed) tvStatus?.text = statusMessage
@@ -377,12 +400,16 @@ class TaskService : android.app.Service() {
     }
 
     private fun broadcastStats() {
+        // 先更新快照，界面每秒轮询它，广播丢了也能同步
+        autoRunningSnapshot = isAutoRunning
+        statusSnapshot = compactStatusMessage
         try {
             sendBroadcast(Intent("com.app.helper.STATS_ACTION")
                 .putExtra("completed", uploadCount)
                 .putExtra("failed", failedCount)
                 .putExtra("target_version", targetVersion)
                 .putExtra("running", isAutoRunning)
+                .putExtra("status", compactStatusMessage)
                 .putExtra("current_task", if (currentTaskId.isBlank()) "无" else "shop=$currentShopId item=$currentItemId"))
         } catch (_: Exception) {}
     }
@@ -625,29 +652,67 @@ class TaskService : android.app.Service() {
                     launchShopeeProduct()
                 }
 
-                updateFloatStatus("等待数据回传...")
-                val gotContent = waitForData()
-                if (!gotContent) {
-                    recordDataTimeout()
-                    // 回传超时/失败也要先回聊天页，否则下个任务会在商品页上开始。
-                    // 用 isUploading 挡住倒计时，避免还没回到聊天页就开始领下一个任务。
-                    isUploading = true
-                    returnToChatIfNeeded("回传失败，返回聊天页...")
-                    isUploading = false
+                // 抓到的数据可能属于别的商品（环境 App 的抓包按 item_id 匹配，
+                // 但残留响应/预取响应会混进来）。这里最多重抓 3 次，
+                // 每次重新发唤醒广播，直到拿到的 item_id 与任务一致。
+                var content: String? = null
+                var attempt = 0
+                while (attempt < 3) {
+                    if (attempt == 0) {
+                        updateFloatStatus("等待数据回传...")
+                    } else {
+                        updateFloatStatus("数据不匹配，重新抓取（第${attempt + 1}次）...")
+                        pendingFileContent = null
+                        delay(600)
+                        launchShopeeProduct()
+                    }
+                    val got = waitForData()
+                    if (!got) {
+                        if (attempt == 0) {
+                            recordDataTimeout()
+                            isUploading = true
+                            returnToChatIfNeeded("回传失败，返回聊天页...")
+                            isUploading = false
+                            return@launch
+                        }
+                        break
+                    }
+                    // 不能用 !!：waitForData 返回到这一行之间，另一个循环
+                    // 可能已经把 pendingFileContent 清空，抛 NPE 会让服务崩溃。
+                    val raw = pendingFileContent
+                    pendingFileContent = null
+                    if (raw.isNullOrBlank()) {
+                        Log.w(TAG, "pending data vanished before submit")
+                        if (attempt == 0) recordDataTimeout()
+                        break
+                    }
+                    val gotItem = itemIdFromResult(extractEncryptedData(raw))
+                    val matches = gotItem.isBlank() ||
+                        currentItemId <= 0L ||
+                        gotItem == currentItemId.toString()
+                    if (matches) {
+                        content = raw
+                        break
+                    }
+                    // 不匹配：丢弃，重新抓
+                    failedCount++
+                    consecutiveMismatch++
+                    Log.w(TAG, "mismatch: got=$gotItem want=$currentItemId attempt=$attempt")
+                    updateFloatStatus("抓到 item=$gotItem，任务 item=$currentItemId，丢弃重抓")
+                    if (consecutiveMismatch >= 6) {
+                        stopAutoForDataMismatch()
+                        return@launch
+                    }
+                    attempt++
+                }
+
+                if (content == null) {
+                    updateFloatStatus("连续抓不到本任务的数据，跳过该任务")
+                    returnToChatIfNeeded("返回聊天页...")
                     return@launch
                 }
                 consecutiveTimeouts = 0
-
-                // 不能用 !!：waitForData 返回到这一行之间，另一个循环
-                // 或优惠券预检可能已经把 pendingFileContent 清空，
-                // 抛 NullPointerException 会让服务崩溃、App 直接闪退。
-                val content = pendingFileContent
-                pendingFileContent = null
-                if (content.isNullOrBlank()) {
-                    Log.w(TAG, "pending data vanished before submit")
-                    recordDataTimeout()
-                    return@launch
-                }
+                consecutiveMismatch = 0
                 isUploading = true
                 updateFloatStatus("正在上传数据...")
                 submitTaskResult1(content)
@@ -665,6 +730,16 @@ class TaskService : android.app.Service() {
     }
 
     private suspend fun launchShopeeProduct() {
+        // 环境 App 的广播接收器直接 split("/") 后取最后两段做 parseLong，
+        // 没有 try/catch：URL 里任一数字段缺失或为空都会抛异常，
+        // 从 BroadcastReceiver 抛出就是进程崩溃（用户看到的「跳转就闪退」）。
+        // 所以 shop/item 非法时宁可跳过，也不要发广播。
+        if (currentShopId <= 0L || currentItemId <= 0L) {
+            updateFloatStatus("任务缺少 shop/item，跳过：shop=$currentShopId item=$currentItemId")
+            Log.w(TAG, "invalid task ids, skip broadcast")
+            if (isAutoRunning) startNextTaskCycle(forceDelaySec = 2)
+            return
+        }
         val productUrl = "https://shopee.tw/product/$currentShopId/$currentItemId"
         val wakeIntent = Intent(ApiConfig.WAKE_ACTION).apply {
             setPackage(ApiConfig.TARGET_PACKAGE)

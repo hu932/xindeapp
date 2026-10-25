@@ -2,6 +2,7 @@ package com.app.helper.ui.compose
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +23,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -29,12 +31,18 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -45,7 +53,9 @@ fun EnvPage(
     onGenerateFp: () -> Unit,
     onBatchGenerateFp: () -> Unit,
     onFpClick: (FingerprintManagerFp) -> Unit,
+    onFpDelete: (List<String>) -> Unit,
 ) {
+    var confirming by remember { mutableStateOf(false) }
     Column(
         Modifier
             .fillMaxSize()
@@ -100,6 +110,34 @@ fun EnvPage(
                         Text("批量")
                     }
                 }
+                if (state.fpSelected.isNotEmpty()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            "已选 ${state.fpSelected.size} 个",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = {
+                            if (state.fpSelected.size == state.fpList.size) {
+                                state.fpSelected.clear()
+                            } else {
+                                state.fpSelected.clear()
+                                state.fpList.forEach { state.fpSelected.add(it.name) }
+                            }
+                        }) { Text("全选/取消", fontSize = 12.sp) }
+                        Button(
+                            onClick = { confirming = true },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error,
+                            ),
+                        ) { Text("删除", fontSize = 12.sp) }
+                    }
+                }
             }
         }
 
@@ -127,30 +165,87 @@ fun EnvPage(
                 } else {
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         items(state.fpList) { fp ->
-                            FpRow(fp) { onFpClick(fp) }
+                            val selected = state.fpSelected.contains(fp.name)
+                            FpRow(
+                                fp = fp,
+                                selected = selected,
+                                onClick = {
+                                    if (state.fpSelected.isNotEmpty()) {
+                                        if (selected) state.fpSelected.remove(fp.name)
+                                        else state.fpSelected.add(fp.name)
+                                    } else {
+                                        onFpClick(fp)
+                                    }
+                                },
+                                onLongClick = {
+                                    if (selected) state.fpSelected.remove(fp.name)
+                                    else state.fpSelected.add(fp.name)
+                                },
+                            )
                         }
                     }
                 }
             }
         }
     }
+
+    if (confirming) {
+        AlertDialog(
+            onDismissRequest = { confirming = false },
+            title = { Text("删除环境") },
+            text = {
+                Text(
+                    "确定删除选中的 ${state.fpSelected.size} 个环境？" +
+                            "删除后不可恢复，正在使用的那条也会一起删掉。",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onFpDelete(state.fpSelected.toList())
+                    state.fpSelected.clear()
+                    confirming = false
+                }) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirming = false }) { Text("取消") }
+            },
+        )
+    }
 }
 
 @Composable
-private fun FpRow(fp: FingerprintManagerFp, onClick: () -> Unit) {
+private fun FpRow(
+    fp: FingerprintManagerFp,
+    selected: Boolean = false,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
+) {
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .background(
-                if (fp.isActive) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surfaceVariant
+                when {
+                    selected -> MaterialTheme.colorScheme.secondaryContainer
+                    fp.isActive -> MaterialTheme.colorScheme.primaryContainer
+                    else -> MaterialTheme.colorScheme.surfaceVariant
+                }
             )
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (fp.isActive) {
+        if (selected) {
+            Icon(
+                Icons.Filled.CheckCircle,
+                null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+        } else if (fp.isActive) {
             Icon(
                 Icons.Filled.CheckCircle,
                 null,

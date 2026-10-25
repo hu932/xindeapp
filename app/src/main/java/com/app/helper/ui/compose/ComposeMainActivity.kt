@@ -29,7 +29,9 @@ import com.app.helper.vpn.ApkInstaller
 import com.app.helper.vpn.VpnController
 import com.app.helper.vpn.VpnGuard
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -46,6 +48,7 @@ import kotlinx.coroutines.withContext
 class ComposeMainActivity : ComponentActivity() {
 
     private val state = UiState()
+    private var syncPollJob: Job? = null
     private var logReceiver: BroadcastReceiver? = null
     private var statsReceiver: BroadcastReceiver? = null
 
@@ -60,6 +63,7 @@ class ComposeMainActivity : ComponentActivity() {
 
         requestPermissions()
         loadPrefs()
+        startStatePoll()
         loadAvatar()
         refreshVpnState()
         registerReceivers()
@@ -90,6 +94,7 @@ class ComposeMainActivity : ComponentActivity() {
                 onGenerateFp = { generateFp(1) },
                 onBatchGenerateFp = { generateFp(5) },
                 onFpClick = { fp -> activateFp(fp.name) },
+                onFpDelete = { names -> deleteFingerprints(names) },
                 onVpnToggle = { on -> toggleVpn(on) },
                 onVpnConnect = { connectFastestVpn() },
                 onInstallVpn = { installVpnApp() },
@@ -572,6 +577,48 @@ class ComposeMainActivity : ComponentActivity() {
             state.addLog("[代理] 注意：" + label + " 不支持推送节点，掉线只能重连")
         }
         refreshVpnState()
+    }
+
+
+    // ---------------- 状态轮询 ----------------
+
+    /**
+     * 每秒从 TaskService 的静态快照同步一次运行状态。
+     *
+     * 之前只靠 STATS_ACTION 广播，广播一旦没收到，界面就一直显示
+     * 「已停止 / 未运行」，而悬浮窗其实已经在跑。轮询是兜底，
+     * 广播继续保留（响应更快）。
+     */
+    private fun startStatePoll() {
+        syncPollJob?.cancel()
+        syncPollJob = lifecycleScope.launch {
+            while (isActive) {
+                state.autoRunning = TaskService.autoRunningSnapshot
+                val snap = TaskService.statusSnapshot
+                if (snap.isNotBlank()) state.status = snap
+                delay(1000)
+            }
+        }
+    }
+
+    // ---------------- 指纹删除 ----------------
+
+    private fun deleteFingerprints(names: List<String>) {
+        if (names.isEmpty()) return
+        lifecycleScope.launch {
+            val removed = withContext(Dispatchers.IO) {
+                var n = 0
+                names.forEach { name ->
+                    val ok = runCatching {
+                        FingerprintManager.deleteFpFile(this@ComposeMainActivity, name)
+                    }.getOrDefault(false)
+                    if (ok) n++
+                }
+                n
+            }
+            state.addLog("[环境] 已删除 $removed 个环境")
+            refreshFingerprints()
+        }
     }
 
 }

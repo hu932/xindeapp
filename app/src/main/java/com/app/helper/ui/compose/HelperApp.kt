@@ -61,6 +61,7 @@ fun HelperApp(
     onGenerateFp: () -> Unit,
     onBatchGenerateFp: () -> Unit,
     onFpClick: (FingerprintManagerFp) -> Unit,
+    onFpDelete: (List<String>) -> Unit,
     onVpnToggle: (Boolean) -> Unit,
     onVpnConnect: () -> Unit,
     onInstallVpn: () -> Unit,
@@ -103,6 +104,7 @@ fun HelperApp(
                             onGenerateFp = onGenerateFp,
                             onBatchGenerateFp = onBatchGenerateFp,
                             onFpClick = onFpClick,
+                            onFpDelete = onFpDelete,
                         )
                     }
                 }
