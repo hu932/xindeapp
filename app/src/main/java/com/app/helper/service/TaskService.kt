@@ -88,6 +88,11 @@ class TaskService : android.app.Service() {
     @Volatile private var versionBlockedMsg = "版本已停用，请更新"
     private var consecutiveTimeouts = 0
     @Volatile private var riskReported = false
+    // 任务循环互斥：防止两轮协程同时跑，互相清空 pendingFileContent
+    @Volatile private var taskCycleRunning = false
+    // 连续上传失败 / 连续抓到不匹配商品，用于熔断
+    private var consecutiveUploadFailures = 0
+    private var consecutiveMismatch = 0
 
     private var touchDownX = 0f
     private var touchDownY = 0f
@@ -412,6 +417,8 @@ class TaskService : android.app.Service() {
             broadcastStats()
         } else {
             isAutoRunning = true
+        consecutiveUploadFailures = 0
+        consecutiveMismatch = 0
             sessionUploadCount = 0
             handler.post {
                 tvAction?.text = "停止自动"
@@ -551,6 +558,14 @@ class TaskService : android.app.Service() {
             stopAutoForDeviceBlock()
             return
         }
+        // 上一轮还没收尾就稍后再排，避免两轮并发互相覆盖 pendingFileContent
+        if (taskCycleRunning) {
+            Log.w(TAG, "previous cycle still running, retry later")
+            handler.postDelayed({
+                if (isAutoRunning && !taskCycleRunning) claimAndExecuteTask()
+            }, 1500)
+            return
+        }
         serviceScope.launch {
             sendHeartbeat()
             if (!deviceAllowed) return@launch
@@ -559,6 +574,11 @@ class TaskService : android.app.Service() {
     }
 
     private fun claimAndExecuteTask1() {
+        if (taskCycleRunning) {
+            Log.w(TAG, "task cycle already running, skip")
+            return
+        }
+        taskCycleRunning = true
         serviceScope.launch {
             try {
                 // 优惠券预检已移除，直接领任务
@@ -618,8 +638,16 @@ class TaskService : android.app.Service() {
                 }
                 consecutiveTimeouts = 0
 
-                val content = pendingFileContent!!
+                // 不能用 !!：waitForData 返回到这一行之间，另一个循环
+                // 或优惠券预检可能已经把 pendingFileContent 清空，
+                // 抛 NullPointerException 会让服务崩溃、App 直接闪退。
+                val content = pendingFileContent
                 pendingFileContent = null
+                if (content.isNullOrBlank()) {
+                    Log.w(TAG, "pending data vanished before submit")
+                    recordDataTimeout()
+                    return@launch
+                }
                 isUploading = true
                 updateFloatStatus("正在上传数据...")
                 submitTaskResult1(content)
@@ -629,6 +657,9 @@ class TaskService : android.app.Service() {
                 updateFloatStatus("任务异常: ${e.message}")
                 isUploading = false
                 if (isAutoRunning) startNextTaskCycle()
+            } finally {
+                // 无论走哪条分支都要复位，否则下一轮永远进不来
+                taskCycleRunning = false
             }
         }
     }
@@ -729,6 +760,23 @@ class TaskService : android.app.Service() {
                 "display_model_id=0&item_id=$currentItemId&model_selection_logic=3" +
                 "&shop_id=$currentShopId&tz_offset_in_minutes=480&detail_level=0"
 
+            // 提交前先本地比对 item_id：抓到的数据若属于别的商品，
+            // 传上去会被后台判 item_id 不匹配（retryable=false），
+            // 白耗一次任务名额，还把失败计数刷高。
+            val resultItemId = itemIdFromResult(rawResponse)
+            if (resultItemId.isNotBlank() && currentItemId > 0L &&
+                resultItemId != currentItemId.toString()
+            ) {
+                consecutiveMismatch++
+                failedCount++
+                Log.w(TAG, "stale data: result item=$resultItemId task item=$currentItemId")
+                updateFloatStatus(
+                    "数据不匹配：抓到 item=$resultItemId，任务 item=$currentItemId\n已丢弃，不提交"
+                )
+                if (consecutiveMismatch >= 3) stopAutoForDataMismatch()
+                return
+            }
+
             val response = ApiService.submitTask(
                 taskId = currentTaskId,
                 taskPageUrl = task.pageUrl(),
@@ -739,6 +787,8 @@ class TaskService : android.app.Service() {
             if (response.isSuccess) {
                 uploadCount++
                 sessionUploadCount++
+                consecutiveUploadFailures = 0
+                consecutiveMismatch = 0
                 Log.d(TAG, "Submit OK: task=$currentTaskId count=$uploadCount")
                 // 聊一聊：上传成功后必须回到聊天页，否则下个任务会在商品页上开始
                 if (returnToChatIfNeeded("上传成功！返回聊天页...")) {
@@ -749,6 +799,7 @@ class TaskService : android.app.Service() {
             } else {
                 failedCount++
                 updateFloatStatus("上传失败: ${response.message}")
+                handleUploadFailure(response.message)
                 // 上传失败也要回聊天页，从聊天页继续下一个任务
                 returnToChatIfNeeded("返回聊天页...")
             }
@@ -763,6 +814,67 @@ class TaskService : android.app.Service() {
             broadcastStats()
             if (isAutoRunning && !triggerPauseRestIfNeeded()) startNextTaskCycle()
         }
+    }
+
+    /** 从抓包结果里取 data.item.item_id，取不到返回空串。 */
+    private fun itemIdFromResult(result: String): String = try {
+        JSONObject(result)
+            .optJSONObject("data")
+            ?.optJSONObject("item")
+            ?.optString("item_id", "")
+            ?.trim()
+            .orEmpty()
+    } catch (_: Exception) {
+        ""
+    }
+
+    /**
+     * 上传失败的分类处理。
+     *
+     * 后台对 item_id 不匹配返回 retryable=false，客户端原来当普通失败重试，
+     * 结果是「连续失败 → 连续领任务 → 连续失败」的死循环。这里按原因熔断。
+     */
+    private fun handleUploadFailure(message: String) {
+        consecutiveUploadFailures++
+        if (message.contains("item_id")) {
+            consecutiveMismatch++
+        } else {
+            consecutiveMismatch = 0
+        }
+        Log.w(
+            TAG,
+            "upload failed: $message (failures=$consecutiveUploadFailures mismatch=$consecutiveMismatch)"
+        )
+        if (consecutiveMismatch >= 3) {
+            stopAutoForDataMismatch()
+            return
+        }
+        if (consecutiveUploadFailures >= 5) {
+            isAutoRunning = false
+            isUploading = false
+            countdownJob?.cancel()
+            handler.post {
+                tvAction?.text = "一键做任务"
+                tvAction?.setBackgroundResource(R.drawable.bg_float_action)
+            }
+            updateFloatStatus("连续${consecutiveUploadFailures}次上传失败，已自动停止\n最后一次：$message")
+            consecutiveUploadFailures = 0
+        }
+    }
+
+    /** 连续抓到不属于当前任务的数据，停止并给出可执行的提示。 */
+    private fun stopAutoForDataMismatch() {
+        isAutoRunning = false
+        isUploading = false
+        countdownJob?.cancel()
+        pauseJob?.cancel()
+        consecutiveMismatch = 0
+        consecutiveUploadFailures = 0
+        handler.post {
+            tvAction?.text = "一键做任务"
+            tvAction?.setBackgroundResource(R.drawable.bg_float_action)
+        }
+        updateFloatStatus("连续3次抓到不匹配的商品数据，已停止\n请确认环境App已支持静默抓取，或关闭静默模式")
     }
 
     /**
