@@ -151,7 +151,17 @@ class TaskService : android.app.Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             "PROCESS_FILE" -> {
-                val content = intent.getStringExtra("file_content").orEmpty()
+                // 优先用 extra；数据过大时接收端会落盘，只传路径过来
+                var content = intent.getStringExtra("file_content").orEmpty()
+                val tmpPath = intent.getStringExtra("file_path_tmp")
+                if (content.isBlank() && !tmpPath.isNullOrBlank()) {
+                    content = runCatching {
+                        val f = java.io.File(tmpPath)
+                        val text = f.readText()
+                        f.delete()
+                        text
+                    }.getOrDefault("")
+                }
                 if (content.isNotBlank()) {
                     pendingFileContent = content
                     Log.d(TAG, "PROCESS_FILE: ${content.length} bytes")
