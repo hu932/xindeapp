@@ -713,8 +713,9 @@ class TaskService : android.app.Service() {
                         break
                     }
                     val gotItem = itemIdFromResult(extractEncryptedData(raw))
-                    // 严格模式：拿不到 item_id 视为不匹配 → 丢弃重抓，避免旧数据被当本任务上传
-                    val matches = gotItem.isNotBlank() && currentItemId > 0L &&
+                    // 解析得到 item_id 且与任务不一致才丢弃；解析不到（App 侧解密失败）就放行，
+                    // 交给后端按 result 内容判断，避免「一条都不上传」。
+                    val matches = gotItem.isBlank() || currentItemId <= 0L ||
                         gotItem == currentItemId.toString()
                     if (matches) {
                         content = raw
@@ -877,17 +878,12 @@ class TaskService : android.app.Service() {
             if (resultItemId.isBlank()) {
                 // 严格模式：解析不到 item_id 就无法确认数据归属，一律不提交。
                 // 原先是「空值放行」，会把别的商品数据传上去，后台判 item_id 不匹配。
-                consecutiveMismatch++
-                failedCount++
                 Log.w(
                     TAG,
-                    "result item id blank -> refuse: task item=$currentItemId, " +
+                    "result item id blank -> 交由后端校验: task item=$currentItemId, " +
                         "rawLen=${rawResponse.length}, prefix=${rawResponse.take(60)}"
                 )
-                updateFloatStatus("数据里没解析出 item_id（任务 item=$currentItemId），丢弃该任务，下一个")
-                if (consecutiveMismatch >= 3) stopAutoForDataMismatch()
-                else if (isAutoRunning) startNextTaskCycle(forceDelaySec = 1)
-                return
+                updateFloatStatus("未解析到 item_id，交由后端校验后再决定")
             }
             if (resultItemId.isNotBlank() && currentItemId > 0L &&
                 resultItemId != currentItemId.toString()
