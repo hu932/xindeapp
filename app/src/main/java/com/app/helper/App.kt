@@ -8,6 +8,11 @@ class App : Application() {
     companion object {
         lateinit var context: Context
             private set
+
+        /** debug 包才输出网络日志，release 一律静默，避免打日志拖慢任务队列 */
+        val isDebug: Boolean by lazy {
+            (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        }
     }
 
     override fun onCreate() {

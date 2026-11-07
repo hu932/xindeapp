@@ -380,13 +380,32 @@ object ApiService {
      * 返回 null 表示领取失败（未授权、额度用完、网络异常）。
      */
     suspend fun fetchFingerprintEnv(): JSONObject? = withContext(Dispatchers.IO) {
+        // 网络抖动/后端短暂繁忙很常见，单次失败就放弃会表现为「领取不到指纹」。
+        // 这里做 3 次重试（指数退避），只有真的未授权/额度用完才会连续失败。
+        val waits = longArrayOf(300L, 900L, 2000L)
+        var last: JSONObject? = null
+        for (i in waits.indices) {
+            last = fetchFingerprintEnvOnce()
+            if (last != null) return@withContext last
+            try {
+                Thread.sleep(waits[i])
+            } catch (_: InterruptedException) {
+            }
+        }
+        last
+    }
+
+    private suspend fun fetchFingerprintEnvOnce(): JSONObject? = withContext(Dispatchers.IO) {
         try {
             val token = TokenManager.getToken()
             // 服务端只对 /api/task 放行 GET，其余接口一律 POST，
             // 用 GET 会在鉴权前就被 405 挡掉。
+            // 后端必需要 accountId（下发id），否则一律 403「缺少手机号参数 accountId」。
+            // 下发id 在登录时由用户填写并存进 TokenManager.username，这里直接取用。
             val payload = JSONObject().apply {
                 put("token", token)
                 put("act", "fp_env_generate")
+                put("accountId", TokenManager.getUsername())
             }
             val request = Request.Builder()
                 .url(ApiConfig.GO_BASE_URL + ApiConfig.FP_ENV_GENERATE_PATH)

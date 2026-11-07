@@ -41,17 +41,21 @@ class ComposeLoginActivity : ComponentActivity() {
         startModePolling()
 
         setContent {
-            LoginScreen(
-                accountId = accountId,
-                onAccountIdChange = {
-                    accountId = it
-                    if (errorText.isNotBlank()) errorText = ""
-                },
-                modeBadge = modeBadge,
-                loading = loading,
-                errorText = errorText,
-                onLogin = { performLogin() },
-            )
+            // 启动动画：先播一段 600ms 的品牌动效，同时后台已经在做登录态判定/模式轮询，
+            // 所以动画结束时数据基本就绪，不会有"转圈等待"的空窗期。
+            SplashGate {
+                LoginScreen(
+                    accountId = accountId,
+                    onAccountIdChange = {
+                        accountId = it
+                        if (errorText.isNotBlank()) errorText = ""
+                    },
+                    modeBadge = modeBadge,
+                    loading = loading,
+                    errorText = errorText,
+                    onLogin = { performLogin() },
+                )
+            }
         }
     }
 
