@@ -235,15 +235,26 @@ class ComposeMainActivity : ComponentActivity() {
                     "yyyy-MM-dd HH:mm:ss", java.util.Locale.US
                 ).format(java.util.Date())
             }
+            // 服务端返回的 name 只精确到秒，批量领取时 5 次调用可能落在同一秒，
+            // 导致后写的把前一个覆盖 —— 日志显示领了 5 个，磁盘上只剩 1 个。
+            // 这里保证文件名唯一（重名就加 _2 / _3 …），并按实际新建的文件计数。
+            var uniqueName = name
+            var dup = 1
+            withContext(Dispatchers.IO) {
+                while (FingerprintManager.loadFingerprintData(this@ComposeMainActivity, uniqueName) != null) {
+                    dup++
+                    uniqueName = "${name}_$dup"
+                }
+            }
             withContext(Dispatchers.IO) {
                 runCatching {
                     FingerprintManager.saveFingerprintData(
-                        this@ComposeMainActivity, name, fp.toString()
+                        this@ComposeMainActivity, uniqueName, fp.toString()
                     )
                 }
             }
             try {
-                ApiService.reportFingerprintEvent("generate", name, fp.toString())
+                ApiService.reportFingerprintEvent("generate", uniqueName, fp.toString())
             } catch (_: Exception) {
             }
             ok++
