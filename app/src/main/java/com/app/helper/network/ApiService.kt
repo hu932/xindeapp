@@ -386,7 +386,10 @@ object ApiService {
         var last: JSONObject? = null
         for (i in waits.indices) {
             last = fetchFingerprintEnvOnce()
-            if (last != null) return@withContext last
+            if (last != null) {
+                lastFpError = ""
+                return@withContext last
+            }
             try {
                 Thread.sleep(waits[i])
             } catch (_: InterruptedException) {
@@ -395,17 +398,26 @@ object ApiService {
         last
     }
 
+    /** 最近一次领取失败的真实原因（供 UI 显示，不再笼统说「服务器未返回」） */
+    @Volatile
+    var lastFpError: String = ""
+        private set
+
     private suspend fun fetchFingerprintEnvOnce(): JSONObject? = withContext(Dispatchers.IO) {
         try {
             val token = TokenManager.getToken()
+            val accountId = TokenManager.getUsername()
+            if (accountId.isBlank()) {
+                lastFpError = "本地没有下发id（请重新登录）"
+                return@withContext null
+            }
             // 服务端只对 /api/task 放行 GET，其余接口一律 POST，
             // 用 GET 会在鉴权前就被 405 挡掉。
             // 后端必需要 accountId（下发id），否则一律 403「缺少手机号参数 accountId」。
-            // 下发id 在登录时由用户填写并存进 TokenManager.username，这里直接取用。
             val payload = JSONObject().apply {
                 put("token", token)
                 put("act", "fp_env_generate")
-                put("accountId", TokenManager.getUsername())
+                put("accountId", accountId)
             }
             val request = Request.Builder()
                 .url(ApiConfig.GO_BASE_URL + ApiConfig.FP_ENV_GENERATE_PATH)
@@ -416,26 +428,32 @@ object ApiService {
             val code = response.code
             val body = response.body?.string()
             if (body.isNullOrBlank()) {
+                lastFpError = "HTTP $code 空响应"
                 android.util.Log.w("ApiService", "fp_env: HTTP $code, empty body")
                 return@withContext null
             }
             val root = JSONObject(body)
             if (!root.optBoolean("success", false)) {
-                val err = root.optString("error", root.optString("msg", ""))
+                val err = root.optString("error", root.optString("msg", "")).ifBlank { "HTTP $code" }
+                lastFpError = err
                 android.util.Log.w("ApiService", "fp_env: HTTP $code, success=false, error=$err")
                 return@withContext null
             }
             val data = root.optJSONObject("data")
             if (data == null) {
+                lastFpError = "返回缺少 data"
                 android.util.Log.w("ApiService", "fp_env: HTTP $code, no data field")
                 return@withContext null
             }
             val fp = data.optJSONObject("fp")
             if (fp == null) {
+                lastFpError = "返回缺少 fp 字段"
                 android.util.Log.w("ApiService", "fp_env: HTTP $code, no fp field, data=$data")
             }
             fp
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            lastFpError = "网络异常：" + (e.message ?: e.javaClass.simpleName)
+            android.util.Log.w("ApiService", "fp_env: exception ${e.message}")
             null
         }
     }

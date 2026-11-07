@@ -1,4 +1,4 @@
-package com.app.helper.ui.compose
+﻿package com.app.helper.ui.compose
 
 import android.Manifest
 import android.app.AlertDialog
@@ -227,7 +227,7 @@ class ComposeMainActivity : ComponentActivity() {
                 try { ApiService.fetchFingerprintEnv() } catch (e: Exception) { null }
             }
             if (fp == null) {
-                failReason = if (failReason.isBlank()) "服务器未返回" else failReason
+                failReason = if (failReason.isBlank()) ApiService.lastFpError.ifBlank { "服务器未返回" } else failReason
                 continue
             }
             val name = fp.optString("name", "").ifBlank {
