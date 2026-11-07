@@ -58,3 +58,8 @@ csyx_reference_v_*.java
 
 # pasted screenshots / scratch images at repo root
 /image-*.png
+
+# 启动动画预览产物（本地用，不入库）
+_prev_*
+_prev_*
+

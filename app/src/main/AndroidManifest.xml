@@ -59,16 +59,23 @@
         android:usesCleartextTraffic="true"
         tools:targetApi="31">
 
-        <!-- Compose 版登录页（启动入口） -->
+        <!-- 启动视频：全屏播放后台下发的视频，播完再进 App -->
         <activity
-            android:name=".ui.compose.ComposeLoginActivity"
+            android:name=".ui.splash.SplashVideoActivity"
             android:exported="true"
-            android:theme="@style/Theme.TaskHelper">
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Compose 版登录页（视频播完后进入） -->
+        <activity
+            android:name=".ui.compose.ComposeLoginActivity"
+            android:exported="false"
+            android:theme="@style/Theme.TaskHelper" />
 
         <!-- 旧版登录页：保留但不再是入口 -->
         <activity
