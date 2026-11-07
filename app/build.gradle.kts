@@ -11,8 +11,10 @@ android {
         applicationId = "com.spotify.music"
         minSdk = 26
         targetSdk = 34
-        versionCode = 7
-        versionName = "1.1.5"
+        // 1.1.6 / 8：修复指纹领取（补 accountId + 重试）、降低网络日志开销、启动与文件读取移出主线程、
+        // 指纹文件原子写；启动改为内容渐入（去掉独立闪屏页与冷启动白屏）
+        versionCode = 8
+        versionName = "1.1.6"
     }
 
     buildTypes {
