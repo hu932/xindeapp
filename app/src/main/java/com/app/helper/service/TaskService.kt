@@ -805,9 +805,19 @@ class TaskService : android.app.Service() {
         val silentWaitMs = 15_000L
         val start = System.currentTimeMillis()
         while (System.currentTimeMillis() - start < silentWaitMs) {
-            if (pendingFileContent != null) {
-                updateFloatStatus("静默抓取成功，数据已回传")
-                return
+            val pending = pendingFileContent
+            if (pending != null) {
+                // 静默模式下环境 App 的抓包是异步的，回调里可能是上一个任务的页面数据。
+                // 必须校验 item_id 与当前任务一致才接受，否则丢弃继续等（这就是库存模式
+                // 频繁「item_id 不匹配」的直接原因）。
+                val got = runCatching { itemIdFromResult(extractEncryptedData(pending)) }.getOrDefault("")
+                if (got.isBlank() || currentItemId <= 0L || got == currentItemId.toString()) {
+                    updateFloatStatus("静默抓取成功（item=$got），数据已回传")
+                    return
+                }
+                Log.w(TAG, "silent stale capture: got=$got want=$currentItemId, drop & wait")
+                updateFloatStatus("静默抓到 item=$got（任务 $currentItemId），丢弃重等")
+                pendingFileContent = null
             }
             delay(300)
         }
