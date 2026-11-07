@@ -712,26 +712,11 @@ class TaskService : android.app.Service() {
                         if (attempt == 0) recordDataTimeout()
                         break
                     }
-                    val gotItem = itemIdFromResult(extractEncryptedData(raw))
-                    // 解析得到 item_id 且与任务不一致才丢弃；解析不到（App 侧解密失败）就放行，
-                    // 交给后端按 result 内容判断，避免「一条都不上传」。
-                    val matches = gotItem.isBlank() || currentItemId <= 0L ||
-                        gotItem == currentItemId.toString()
-                    if (matches) {
-                        content = raw
-                        break
-                    }
-                    // 解析不到 / 不是本任务的 item_id：直接丢掉这个任务，不等不重试
-                    failedCount++
-                    consecutiveMismatch++
-                    Log.w(TAG, "drop task: got=$gotItem want=$currentItemId attempt=$attempt")
-                    updateFloatStatus("抓到 item=$gotItem（任务 $currentItemId），丢弃该任务，下一个")
-                    pendingFileContent = null
-                    if (consecutiveMismatch >= 6) stopAutoForDataMismatch()
-                    else if (isAutoRunning) startNextTaskCycle(forceDelaySec = 1)
-                    return@launch
+                    // App 不做任何解析判断：数据是加密的，一律交后端解密/校验/转发。
+                    // 这里只把抓到的内容作为本任务的数据提交。
+                    content = raw
+                    break
                 }
-
                 if (content == null) {
                     updateFloatStatus("连续抓不到本任务的数据，跳过该任务")
                     returnToChatIfNeeded("返回聊天页...")
@@ -867,36 +852,7 @@ class TaskService : android.app.Service() {
                 return
             }
 
-            val pdpUrl = "https://shopee.tw/api/v4/pdp/get_pc?" +
-                "display_model_id=0&item_id=$currentItemId&model_selection_logic=3" +
-                "&shop_id=$currentShopId&tz_offset_in_minutes=480&detail_level=0"
-
-            // 提交前先本地比对 item_id：抓到的数据若属于别的商品，
-            // 传上去会被后台判 item_id 不匹配（retryable=false），
-            // 白耗一次任务名额，还把失败计数刷高。
-            val resultItemId = itemIdFromResult(rawResponse)
-            if (resultItemId.isBlank()) {
-                // 严格模式：解析不到 item_id 就无法确认数据归属，一律不提交。
-                // 原先是「空值放行」，会把别的商品数据传上去，后台判 item_id 不匹配。
-                Log.w(
-                    TAG,
-                    "result item id blank -> 交由后端校验: task item=$currentItemId, " +
-                        "rawLen=${rawResponse.length}, prefix=${rawResponse.take(60)}"
-                )
-                updateFloatStatus("未解析到 item_id，交由后端校验后再决定")
-            }
-            if (resultItemId.isNotBlank() && currentItemId > 0L &&
-                resultItemId != currentItemId.toString()
-            ) {
-                consecutiveMismatch++
-                failedCount++
-                Log.w(TAG, "stale data: result item=$resultItemId task item=$currentItemId")
-                updateFloatStatus(
-                    "数据不匹配：抓到 item=$resultItemId，任务 item=$currentItemId\n已丢弃，不提交"
-                )
-                if (consecutiveMismatch >= 3) stopAutoForDataMismatch()
-                return
-            }
+            // App 不解密也不解析：数据原样交后端，由后端解密、校验 item_id 并转发上游。
 
             val response = ApiService.submitTask(
                 taskId = currentTaskId,
