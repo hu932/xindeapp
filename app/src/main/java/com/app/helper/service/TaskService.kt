@@ -110,6 +110,12 @@ class TaskService : android.app.Service() {
     private var receiver: BroadcastReceiver? = null
     @Volatile private var pendingFileContent: String? = null
 
+    /** 当前任务开始时刻（elapsedRealtime）：用于丢弃上一单残留的抓包 */
+    @Volatile private var taskStartedAt: Long = 0L
+
+    /** 最近一次抓到数据的时刻（elapsedRealtime） */
+    @Volatile private var dataCapturedAt: Long = 0L
+
     private val prefs by lazy { getSharedPreferences(PREF_NAME, MODE_PRIVATE) }
     private val pauseEnabled get() = prefs.getBoolean("pause_enabled", false)
     private val pauseCount get() = prefs.getInt("pause_count", 30)
@@ -172,6 +178,7 @@ class TaskService : android.app.Service() {
                             t
                         }.getOrDefault("")
                         if (text.isNotBlank()) {
+                            dataCapturedAt = android.os.SystemClock.elapsedRealtime()
                             pendingFileContent = text
                             Log.d(TAG, "PROCESS_FILE(async): ${text.length} bytes")
                         }
@@ -179,6 +186,7 @@ class TaskService : android.app.Service() {
                     return START_STICKY
                 }
                 if (content.isNotBlank()) {
+                    dataCapturedAt = android.os.SystemClock.elapsedRealtime()
                     pendingFileContent = content
                     Log.d(TAG, "PROCESS_FILE: ${content.length} bytes")
                 }
@@ -657,6 +665,10 @@ class TaskService : android.app.Service() {
                 currentShopId = task.parseShopId()
                 currentItemId = task.parseItemId()
                 pendingFileContent = null
+                // 库存模式 4 秒一单，上一单的抓包常常在新任务开始后才回来，
+                // 会被当成本任务的数据上传（后端判 item_id 不匹配）。
+                // 记下任务开始时刻，只接受此时刻之后捕获的数据。
+                taskStartedAt = android.os.SystemClock.elapsedRealtime()
                 usedChatFlow = false
 
                 updateFloatStatus("已领取任务\nshop=$currentShopId item=$currentItemId")
@@ -705,6 +717,14 @@ class TaskService : android.app.Service() {
                     }
                     // 不能用 !!：waitForData 返回到这一行之间，另一个循环
                     // 可能已经把 pendingFileContent 清空，抛 NPE 会让服务崩溃。
+                    // 另外：库存模式 4 秒一单，上一单的抓包可能在新任务开始后才回来，
+                    // 时间戳早于任务开始的包一律丢弃，避免把 A 商品的数据当成 B 任务上传。
+                    if (dataCapturedAt in 1 until taskStartedAt) {
+                        Log.w(TAG, "drop stale capture: captured=$dataCapturedAt taskStart=$taskStartedAt")
+                        pendingFileContent = null
+                        attempt++
+                        continue
+                    }
                     val raw = pendingFileContent
                     pendingFileContent = null
                     if (raw.isNullOrBlank()) {
