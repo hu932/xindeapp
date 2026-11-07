@@ -172,7 +172,6 @@ class TaskService : android.app.Service() {
                             t
                         }.getOrDefault("")
                         if (text.isNotBlank()) {
-                            dataCapturedAt = android.os.SystemClock.elapsedRealtime()
                             pendingFileContent = text
                             Log.d(TAG, "PROCESS_FILE(async): ${text.length} bytes")
                         }
@@ -180,7 +179,6 @@ class TaskService : android.app.Service() {
                     return START_STICKY
                 }
                 if (content.isNotBlank()) {
-                    dataCapturedAt = android.os.SystemClock.elapsedRealtime()
                     pendingFileContent = content
                     Log.d(TAG, "PROCESS_FILE: ${content.length} bytes")
                 }
@@ -707,14 +705,6 @@ class TaskService : android.app.Service() {
                     }
                     // 不能用 !!：waitForData 返回到这一行之间，另一个循环
                     // 可能已经把 pendingFileContent 清空，抛 NPE 会让服务崩溃。
-                    // 另外：库存模式 4 秒一单，上一单的抓包可能在新任务开始后才回来，
-                    // 时间戳早于任务开始的包一律丢弃，避免把 A 商品的数据当成 B 任务上传。
-                    if (dataCapturedAt in 1 until taskStartedAt) {
-                        Log.w(TAG, "drop stale capture: captured=$dataCapturedAt taskStart=$taskStartedAt")
-                        pendingFileContent = null
-                        attempt++
-                        continue
-                    }
                     val raw = pendingFileContent
                     pendingFileContent = null
                     if (raw.isNullOrBlank()) {
@@ -730,16 +720,15 @@ class TaskService : android.app.Service() {
                         content = raw
                         break
                     }
-                    // 不匹配：丢弃，重新抓
+                    // 解析不到 / 不是本任务的 item_id：直接丢掉这个任务，不等不重试
                     failedCount++
                     consecutiveMismatch++
-                    Log.w(TAG, "mismatch: got=$gotItem want=$currentItemId attempt=$attempt")
-                    updateFloatStatus("抓到 item=$gotItem，任务 item=$currentItemId，丢弃重抓")
-                    if (consecutiveMismatch >= 6) {
-                        stopAutoForDataMismatch()
-                        return@launch
-                    }
-                    attempt++
+                    Log.w(TAG, "drop task: got=$gotItem want=$currentItemId attempt=$attempt")
+                    updateFloatStatus("抓到 item=$gotItem（任务 $currentItemId），丢弃该任务，下一个")
+                    pendingFileContent = null
+                    if (consecutiveMismatch >= 6) stopAutoForDataMismatch()
+                    else if (isAutoRunning) startNextTaskCycle(forceDelaySec = 1)
+                    return@launch
                 }
 
                 if (content == null) {
@@ -895,8 +884,9 @@ class TaskService : android.app.Service() {
                     "result item id blank -> refuse: task item=$currentItemId, " +
                         "rawLen=${rawResponse.length}, prefix=${rawResponse.take(60)}"
                 )
-                updateFloatStatus("数据里没解析出 item_id（任务 item=$currentItemId），已拒绝提交，重新抓")
+                updateFloatStatus("数据里没解析出 item_id（任务 item=$currentItemId），丢弃该任务，下一个")
                 if (consecutiveMismatch >= 3) stopAutoForDataMismatch()
+                else if (isAutoRunning) startNextTaskCycle(forceDelaySec = 1)
                 return
             }
             if (resultItemId.isNotBlank() && currentItemId > 0L &&
