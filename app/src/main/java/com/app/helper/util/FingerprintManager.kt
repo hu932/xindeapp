@@ -79,7 +79,6 @@ object FingerprintManager {
     }
 
     fun getActiveFpName(context: Context): String? {
-    fun getActiveFpName(context: Context): String? {
         // 以 fp_prefs 为权威，legacy 只做兜底，避免两个 key 打架
         val primary = context.getSharedPreferences("fp_prefs", Context.MODE_PRIVATE)
             .getString(ACTIVE_FP_KEY, null)
