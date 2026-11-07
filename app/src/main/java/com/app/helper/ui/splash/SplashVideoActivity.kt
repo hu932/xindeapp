@@ -1,4 +1,4 @@
-package com.app.helper.ui.splash
+﻿package com.app.helper.ui.splash
 
 import android.app.Activity
 import android.content.Intent
@@ -33,8 +33,15 @@ import com.app.helper.ui.compose.ComposeLoginActivity
 class SplashVideoActivity : Activity() {
 
     companion object {
-        const val DEFAULT_URL =
-            "https://api.suyanw.cn/api/jhsp.php?msg=%E5%AF%B9%E8%84%B8%E8%87%AA%E6%8B%8D"
+        /** 自己的服务器（稳定、可控）；list.json 列出可用视频 */
+        const val SERVER_BASE = "http://38.175.194.43"
+        const val LIST_URL = SERVER_BASE + "/splash/list.json"
+
+        /** list.json 拿不到时的兜底清单（与服务器一致） */
+        val FALLBACK_VIDEOS = listOf(
+            "splash_01.mp4", "splash_02.mp4", "splash_03.mp4",
+            "splash_04.mp4", "splash_05.mp4", "splash_06.mp4",
+        )
         const val EXTRA_URL = "splash_video_url"
 
         private const val PREPARE_TIMEOUT_MS = 3500L
@@ -99,7 +106,8 @@ class SplashVideoActivity : Activity() {
 
         setContentView(rootLayout)
 
-        val url = intent.getStringExtra(EXTRA_URL)?.takeIf { it.isNotBlank() } ?: DEFAULT_URL
+        val explicit = intent.getStringExtra(EXTRA_URL)?.takeIf { it.isNotBlank() }
+        val url = explicit ?: runCatching { pickVideoUrl() }.getOrNull() ?: (SERVER_BASE + "/splash/" + FALLBACK_VIDEOS[0])
 
         vv.setOnPreparedListener { mp: MediaPlayer ->
             preparedAt = SystemClock.elapsedRealtime()
@@ -127,6 +135,30 @@ class SplashVideoActivity : Activity() {
         ui.postDelayed({ goNext() }, HARD_TIMEOUT_MS)
     }
 
+    /**
+     * 从自己服务器取视频清单，随机挑一个；失败返回 null（调用方用兜底地址）。
+     */
+    private fun pickVideoUrl(): String? {
+        return try {
+            val conn = (java.net.URL(LIST_URL).openConnection() as java.net.HttpURLConnection).apply {
+                connectTimeout = 1200
+                readTimeout = 1200
+                setRequestProperty("User-Agent", "okhttp/4.9.3")
+            }
+            if (conn.responseCode !in 200..299) {
+                conn.disconnect()
+                return null
+            }
+            val body = conn.inputStream.bufferedReader().use { it.readText() }
+            conn.disconnect()
+            val arr = org.json.JSONObject(body).optJSONArray("videos") ?: return null
+            if (arr.length() == 0) return null
+            val name = arr.getString((0 until arr.length()).random())
+            SERVER_BASE + "/splash/" + name
+        } catch (e: Exception) {
+            null
+        }
+    }
     private fun hideLoading() {
         val box = loading ?: return
         if (box.visibility != View.VISIBLE) return
