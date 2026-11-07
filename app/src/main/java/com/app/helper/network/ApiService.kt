@@ -215,6 +215,14 @@ object ApiService {
                 body.put("account_id", TokenManager.getUsername())
                 body.put("trace_id", taskId.ifBlank { task.traceId.ifBlank { task.id() } })
                 body.put("data", rawResponse)
+                // 把当前任务的 URL 一并回传：后台可以按 url 里的 item_id 做二次校验，
+                // 出现「回传的是上一条任务的商品」时能立刻定位，而不是只凭 result 内容猜。
+                val pageUrl = taskPageUrl.ifBlank { task.pageUrl() }
+                if (pageUrl.isNotBlank()) {
+                    body.put("url", pageUrl)
+                    body.put("task_url", pageUrl)
+                }
+                body.put("submit_url", submitUrl)
                 val jsonBody = body.toString()
                     .toRequestBody("application/json; charset=utf-8".toMediaType())
                 val request = Request.Builder()

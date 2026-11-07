@@ -865,6 +865,16 @@ class TaskService : android.app.Service() {
             // 传上去会被后台判 item_id 不匹配（retryable=false），
             // 白耗一次任务名额，还把失败计数刷高。
             val resultItemId = itemIdFromResult(rawResponse)
+            if (resultItemId.isBlank()) {
+                // 提取不到 item_id 时原来的校验会直接放行，导致「上一条任务的数据」被发出去，
+                // 后台判 item_id 不匹配。这里把情况记下来，便于定位是解密失败还是字段变了。
+                Log.w(
+                    TAG,
+                    "result item id blank: task item=$currentItemId, rawLen=${rawResponse.length}, " +
+                        "prefix=${rawResponse.take(60)}"
+                )
+                updateFloatStatus("数据里没有解析到 item_id（任务 item=$currentItemId），已记录日志")
+            }
             if (resultItemId.isNotBlank() && currentItemId > 0L &&
                 resultItemId != currentItemId.toString()
             ) {
