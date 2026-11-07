@@ -1,4 +1,4 @@
-package com.app.helper.ui.splash
+﻿package com.app.helper.ui.splash
 
 import android.content.Intent
 import android.graphics.Color
@@ -10,7 +10,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.view.WindowManager
 import android.widget.VideoView
-import androidx.appcompat.app.AppCompatActivity
+import android.app.Activity
 import com.app.helper.ui.compose.ComposeLoginActivity
 
 /**
@@ -23,7 +23,7 @@ import com.app.helper.ui.compose.ComposeLoginActivity
  *
  * 视频地址可通过 Intent extra [EXTRA_URL] 覆盖。
  */
-class SplashVideoActivity : AppCompatActivity() {
+class SplashVideoActivity : Activity() {
 
     companion object {
         // 后台接口，直接返回 video/mp4
