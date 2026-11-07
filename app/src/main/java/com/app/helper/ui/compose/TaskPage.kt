@@ -374,8 +374,13 @@ private fun LogCard(state: UiState, onClearLogs: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
+                    // 只渲染最近 120 行：日志是整表重组的重灾区，
+                    // 上千行时每次状态变化都要重新测量全部 Text，直接卡顿。
+                    val shown = remember(state.logs.size) {
+                        if (state.logs.size > 120) state.logs.takeLast(120) else state.logs
+                    }
                     Column {
-                        state.logs.forEach { line ->
+                        shown.forEach { line ->
                             Text(
                                 line,
                                 style = MaterialTheme.typography.bodySmall,

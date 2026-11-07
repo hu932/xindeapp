@@ -132,9 +132,16 @@ class TaskService : android.app.Service() {
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, createNotification())
         registerDataReceiver()
-        createFloatWindow()
-        startHeartbeat()
-        startUpdateCheck()
+        // 悬浮窗 / 心跳 / 更新检查都要读配置、建 View、发网络，
+        // 原来全在主线程 onCreate 里同步做，冷启动会被拖住（打开App卡顿的另一半原因）。
+        // 这里推迟到首帧之后，并用后台线程，进入界面立刻可用。
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            runCatching { createFloatWindow() }
+        }, 120)
+        kotlin.concurrent.thread(name = "task-init", isDaemon = true) {
+            runCatching { startHeartbeat() }
+            runCatching { startUpdateCheck() }
+        }
         // 崩溃时把任务现场一起写进报告，否则只有堆栈不知道当时跑到哪一步
         CrashHandler.stateProvider = {
             buildString {
@@ -155,12 +162,21 @@ class TaskService : android.app.Service() {
                 var content = intent.getStringExtra("file_content").orEmpty()
                 val tmpPath = intent.getStringExtra("file_path_tmp")
                 if (content.isBlank() && !tmpPath.isNullOrBlank()) {
-                    content = runCatching {
-                        val f = java.io.File(tmpPath)
-                        val text = f.readText()
-                        f.delete()
-                        text
-                    }.getOrDefault("")
+                    // 商品 JSON 动辄几十~几百 KB，readText 同步读会卡住主线程，
+                    // 放到后台线程读，读完再赋值。
+                    kotlin.concurrent.thread(name = "proc-file", isDaemon = true) {
+                        val text = runCatching {
+                            val f = java.io.File(tmpPath)
+                            val t = f.readText()
+                            f.delete()
+                            t
+                        }.getOrDefault("")
+                        if (text.isNotBlank()) {
+                            pendingFileContent = text
+                            Log.d(TAG, "PROCESS_FILE(async): ${text.length} bytes")
+                        }
+                    }
+                    return START_STICKY
                 }
                 if (content.isNotBlank()) {
                     pendingFileContent = content
