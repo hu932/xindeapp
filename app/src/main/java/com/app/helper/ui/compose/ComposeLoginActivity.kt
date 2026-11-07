@@ -1,4 +1,4 @@
-package com.app.helper.ui.compose
+﻿package com.app.helper.ui.compose
 
 import android.content.Intent
 import android.os.Bundle
@@ -33,6 +33,16 @@ class ComposeLoginActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // 关键：在 Compose 画第一帧之前就把窗口背景改成同一个深色，
+        // 否则冷启动会先露一帧主题白底（就是你说的"先白屏再动画"）。
+        runCatching {
+            window.setBackgroundDrawable(
+                android.graphics.drawable.ColorDrawable(
+                    android.graphics.Color.parseColor("#0B1220")
+                )
+            )
+        }
+
         if (TokenManager.isLoggedIn()) {
             startMain()
             return
@@ -41,8 +51,7 @@ class ComposeLoginActivity : ComponentActivity() {
         startModePolling()
 
         setContent {
-            // 启动动画：先播一段 600ms 的品牌动效，同时后台已经在做登录态判定/模式轮询，
-            // 所以动画结束时数据基本就绪，不会有"转圈等待"的空窗期。
+            // 直接渐入：内容自身淡入，不做独立闪屏页（避免白屏→动画→页面三段跳）
             SplashGate {
                 LoginScreen(
                     accountId = accountId,
