@@ -854,6 +854,11 @@ class TaskService : android.app.Service() {
 
             // App 不解密也不解析：数据原样交后端，由后端解密、校验 item_id 并转发上游。
 
+            // 提交给上游的 pdp 链接（带 item_id=），由后端 refineSubmitURL 决定是否采用
+            val pdpUrl = "https://shopee.tw/api/v4/pdp/get_pc?" +
+                "display_model_id=0&item_id=$currentItemId&model_selection_logic=3" +
+                "&shop_id=$currentShopId&tz_offset_in_minutes=480&detail_level=0"
+
             val response = ApiService.submitTask(
                 taskId = currentTaskId,
                 taskPageUrl = task.pageUrl(),
