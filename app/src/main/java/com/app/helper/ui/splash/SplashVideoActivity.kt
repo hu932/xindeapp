@@ -1,14 +1,11 @@
-﻿package com.app.helper.ui.splash
+package com.app.helper.ui.splash
 
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Color
-import android.media.MediaPlayer
-import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -17,44 +14,49 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
-import android.widget.VideoView
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import com.app.helper.R
 import com.app.helper.ui.compose.ComposeLoginActivity
 
 /**
- * 启动页：在启动界面内流式播放后台下发的视频，播完再进 App。
+ * 启动页：播放自有服务器上的视频。
  *
- * 解决「打开 App 黑屏、视频出不来」：
- *   1. 缓冲期间显示 图标 + 进度圈 + 「加载中」，不是纯黑
- *   2. prepare 超时 12s → 3.5s：网络不行立刻跳过
- *   3. 卡顿看门狗：播放后 4s 播放位置没有推进，视为卡死直接跳过
- *   4. 首帧渲染（MEDIA_INFO_VIDEO_RENDERING_START）后才撤掉加载层
+ * 用 ExoPlayer 而不是系统 VideoView —— 后者在部分机型/封装上会出现
+ * 「有声音、画面全黑」（MediaPlayer 视频解码后无法上屏）。
+ * 这里还加了失败自动换片（最多 3 条）与三重超时兜底。
  */
 class SplashVideoActivity : Activity() {
 
     companion object {
-        /** 自己的服务器（稳定、可控）；list.json 列出可用视频 */
         const val SERVER_BASE = "http://38.175.194.43"
         const val LIST_URL = SERVER_BASE + "/splash/list.json"
+        const val EXTRA_URL = "splash_video_url"
 
-        /** list.json 拿不到时的兜底清单（与服务器一致） */
         val FALLBACK_VIDEOS = listOf(
             "splash_01.mp4", "splash_02.mp4", "splash_03.mp4",
             "splash_04.mp4", "splash_05.mp4", "splash_06.mp4",
         )
-        const val EXTRA_URL = "splash_video_url"
 
-        private const val PREPARE_TIMEOUT_MS = 3500L
+        private const val PREPARE_TIMEOUT_MS = 4000L
         private const val STALL_TIMEOUT_MS = 4000L
         private const val HARD_TIMEOUT_MS = 30000L
+        private const val MAX_TRIES = 3
     }
 
     private val ui = Handler(Looper.getMainLooper())
     private var finished = false
-    private var videoView: VideoView? = null
+    private var player: ExoPlayer? = null
+    private var playerView: PlayerView? = null
     private var loading: FrameLayout? = null
-    private var preparedAt = 0L
-    private var lastPos = -1
+    private var candidates: List<String> = emptyList()
+    private var tryIndex = 0
+    private var renderingStarted = false
+    private var lastPos = -1L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -63,19 +65,18 @@ class SplashVideoActivity : Activity() {
         window.navigationBarColor = Color.BLACK
 
         val density = resources.displayMetrics.density
-        val rootLayout = FrameLayout(this)
-        rootLayout.setBackgroundColor(Color.BLACK)
+        val root = FrameLayout(this)
+        root.setBackgroundColor(Color.BLACK)
 
-        val vv = VideoView(this)
-        vv.setBackgroundColor(Color.BLACK)
-        vv.layoutParams = FrameLayout.LayoutParams(-1, -1)
-        rootLayout.addView(vv)
-        videoView = vv
+        val pv = PlayerView(this)
+        pv.useController = false
+        pv.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+        pv.setShutterBackgroundColor(Color.BLACK)
+        root.addView(pv, FrameLayout.LayoutParams(-1, -1))
+        playerView = pv
 
-        // 加载层（缓冲期间可见，避免黑屏）
         val box = FrameLayout(this)
         box.layoutParams = FrameLayout.LayoutParams(-1, -1)
-
         val col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
         col.gravity = Gravity.CENTER_HORIZONTAL
@@ -101,64 +102,117 @@ class SplashVideoActivity : Activity() {
         col.addView(txt, txtLp)
 
         box.addView(col)
-        rootLayout.addView(box)
+        root.addView(box)
         loading = box
 
-        setContentView(rootLayout)
+        setContentView(root)
 
         val explicit = intent.getStringExtra(EXTRA_URL)?.takeIf { it.isNotBlank() }
-        val url = explicit ?: runCatching { pickVideoUrl() }.getOrNull() ?: (SERVER_BASE + "/splash/" + FALLBACK_VIDEOS[0])
-
-        vv.setOnPreparedListener { mp: MediaPlayer ->
-            preparedAt = SystemClock.elapsedRealtime()
-            runCatching { vv.start() }   // 不静音，原声播放
-            ui.postDelayed({ hideLoading() }, 150)
-            startStallWatchdog()
-        }
-        vv.setOnInfoListener { _, what, _ ->
-            if (what == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START ||
-                what == MediaPlayer.MEDIA_INFO_BUFFERING_END
-            ) {
-                hideLoading()
-            }
-            false
-        }
-        vv.setOnCompletionListener { goNext() }
-        vv.setOnErrorListener { _, _, _ ->
-            goNext()
-            true
+        if (explicit != null) {
+            candidates = listOf(explicit)
+            startPlay()
+        } else {
+            Thread {
+                val list = fetchList()
+                ui.post {
+                    candidates = list
+                    startPlay()
+                }
+            }.start()
         }
 
-        runCatching { vv.setVideoURI(Uri.parse(url)) }.onFailure { goNext() }
-
-        ui.postDelayed({ if (!finished && preparedAt == 0L) goNext() }, PREPARE_TIMEOUT_MS)
         ui.postDelayed({ goNext() }, HARD_TIMEOUT_MS)
     }
 
-    /**
-     * 从自己服务器取视频清单，随机挑一个；失败返回 null（调用方用兜底地址）。
-     */
-    private fun pickVideoUrl(): String? {
-        return try {
+    /** 从 /splash/list.json 取清单并打乱；失败用内置兜底清单 */
+    private fun fetchList(): List<String> {
+        val fromServer = runCatching {
             val conn = (java.net.URL(LIST_URL).openConnection() as java.net.HttpURLConnection).apply {
-                connectTimeout = 1200
-                readTimeout = 1200
+                connectTimeout = 1500
+                readTimeout = 1500
                 setRequestProperty("User-Agent", "okhttp/4.9.3")
             }
-            if (conn.responseCode !in 200..299) {
-                conn.disconnect()
-                return null
-            }
-            val body = conn.inputStream.bufferedReader().use { it.readText() }
+            val code = conn.responseCode
+            val body = if (code in 200..299) conn.inputStream.bufferedReader().use { it.readText() } else ""
             conn.disconnect()
-            val arr = org.json.JSONObject(body).optJSONArray("videos") ?: return null
-            if (arr.length() == 0) return null
-            val name = arr.getString((0 until arr.length()).random())
-            SERVER_BASE + "/splash/" + name
-        } catch (e: Exception) {
-            null
-        }
+            val arr = if (body.isBlank()) null else org.json.JSONObject(body).optJSONArray("videos")
+            if (arr == null || arr.length() == 0) emptyList()
+            else (0 until arr.length()).map { i -> SERVER_BASE + "/splash/" + arr.getString(i) }
+        }.getOrDefault(emptyList())
+
+        return if (fromServer.isNotEmpty()) fromServer.shuffled()
+        else FALLBACK_VIDEOS.map { SERVER_BASE + "/splash/" + it }.shuffled()
     }
+
+    private fun startPlay() {
+        if (finished) return
+        if (candidates.isEmpty() || tryIndex >= candidates.size || tryIndex >= MAX_TRIES) {
+            goNext()
+            return
+        }
+        renderingStarted = false
+        lastPos = -1L
+
+        val p = ExoPlayer.Builder(this).build()
+        player = p
+        playerView?.player = p
+        p.setMediaItem(MediaItem.fromUri(candidates[tryIndex]))
+        p.prepare()
+        p.playWhenReady = true
+        p.volume = 1f
+
+        p.addListener(object : Player.Listener {
+            override fun onRenderedFirstFrame() {
+                renderingStarted = true
+                hideLoading()
+            }
+
+            override fun onPlaybackStateChanged(state: Int) {
+                when (state) {
+                    Player.STATE_READY -> {
+                        hideLoading()
+                        startStallWatchdog()
+                    }
+                    Player.STATE_ENDED -> goNext()
+                }
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                tryNext()
+            }
+        })
+
+        ui.postDelayed({ if (!finished && !renderingStarted) tryNext() }, PREPARE_TIMEOUT_MS)
+    }
+
+    private fun tryNext() {
+        if (finished) return
+        tryIndex++
+        runCatching {
+            player?.stop()
+            player?.release()
+        }
+        player = null
+        if (tryIndex >= MAX_TRIES || tryIndex >= candidates.size) goNext() else startPlay()
+    }
+
+    private fun startStallWatchdog() {
+        val check = object : Runnable {
+            override fun run() {
+                if (finished) return
+                val p = player ?: return
+                val pos = p.currentPosition
+                if (pos <= lastPos) {
+                    tryNext()
+                    return
+                }
+                lastPos = pos
+                ui.postDelayed(this, STALL_TIMEOUT_MS)
+            }
+        }
+        ui.postDelayed(check, STALL_TIMEOUT_MS)
+    }
+
     private fun hideLoading() {
         val box = loading ?: return
         if (box.visibility != View.VISIBLE) return
@@ -169,28 +223,15 @@ class SplashVideoActivity : Activity() {
         }
     }
 
-    private fun startStallWatchdog() {
-        val check = object : Runnable {
-            override fun run() {
-                if (finished) return
-                val vv = videoView ?: return
-                val pos = runCatching { vv.currentPosition }.getOrDefault(0)
-                if (pos <= lastPos) {
-                    goNext()
-                    return
-                }
-                lastPos = pos
-                ui.postDelayed(this, STALL_TIMEOUT_MS)
-            }
-        }
-        ui.postDelayed(check, STALL_TIMEOUT_MS)
-    }
-
     private fun goNext() {
         if (finished) return
         finished = true
         ui.removeCallbacksAndMessages(null)
-        runCatching { videoView?.stopPlayback() }
+        runCatching {
+            player?.stop()
+            player?.release()
+        }
+        player = null
         startActivity(Intent(this, ComposeLoginActivity::class.java))
         runCatching { overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out) }
         finish()
@@ -199,8 +240,12 @@ class SplashVideoActivity : Activity() {
     override fun onDestroy() {
         super.onDestroy()
         ui.removeCallbacksAndMessages(null)
-        runCatching { videoView?.stopPlayback() }
-        videoView = null
+        runCatching {
+            player?.stop()
+            player?.release()
+        }
+        player = null
+        playerView = null
         loading = null
     }
 }
