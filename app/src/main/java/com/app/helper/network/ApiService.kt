@@ -419,10 +419,19 @@ object ApiService {
                 put("act", "fp_env_generate")
                 put("accountId", accountId)
             }
+            // HTTP 头只允许 ASCII。库存模式下 token 是 "ajie-inv-<下发id>"，
+            // 下发id 常是中文（如「杰」），直接塞进 Authorization 会抛
+            // "Unexpected char 0x6770 in Authorization value"。
+            // 后端用 accountId 判定授权，这个本地 token 不必上报。
+            val asciiToken = token.filter { it.code in 0x20..0x7E }
             val request = Request.Builder()
                 .url(ApiConfig.GO_BASE_URL + ApiConfig.FP_ENV_GENERATE_PATH)
                 .post(payload.toString().toRequestBody("application/json".toMediaType()))
-                .apply { if (token.isNotBlank()) addHeader("Authorization", "Bearer $token") }
+                .apply {
+                    if (asciiToken.isNotBlank() && asciiToken.length == token.length) {
+                        addHeader("Authorization", "Bearer $asciiToken")
+                    }
+                }
                 .build()
             val response = api2Client.newCall(request).execute()
             val code = response.code
