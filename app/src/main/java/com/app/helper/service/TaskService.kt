@@ -1,4 +1,4 @@
-package com.app.helper.service
+﻿package com.app.helper.service
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -109,12 +109,6 @@ class TaskService : android.app.Service() {
 
     private var receiver: BroadcastReceiver? = null
     @Volatile private var pendingFileContent: String? = null
-
-    /** 当前任务开始时刻（elapsedRealtime）：用于丢弃上一单残留的抓包 */
-    @Volatile private var taskStartedAt: Long = 0L
-
-    /** 最近一次抓到数据的时刻（elapsedRealtime） */
-    @Volatile private var dataCapturedAt: Long = 0L
 
     private val prefs by lazy { getSharedPreferences(PREF_NAME, MODE_PRIVATE) }
     private val pauseEnabled get() = prefs.getBoolean("pause_enabled", false)
@@ -665,10 +659,6 @@ class TaskService : android.app.Service() {
                 currentShopId = task.parseShopId()
                 currentItemId = task.parseItemId()
                 pendingFileContent = null
-                // 库存模式 4 秒一单，上一单的抓包常常在新任务开始后才回来，
-                // 会被当成本任务的数据上传（后端判 item_id 不匹配）。
-                // 记下任务开始时刻，只接受此时刻之后捕获的数据。
-                taskStartedAt = android.os.SystemClock.elapsedRealtime()
                 usedChatFlow = false
 
                 updateFloatStatus("已领取任务\nshop=$currentShopId item=$currentItemId")
@@ -733,8 +723,8 @@ class TaskService : android.app.Service() {
                         break
                     }
                     val gotItem = itemIdFromResult(extractEncryptedData(raw))
-                    val matches = gotItem.isBlank() ||
-                        currentItemId <= 0L ||
+                    // 严格模式：拿不到 item_id 视为不匹配 → 丢弃重抓，避免旧数据被当本任务上传
+                    val matches = gotItem.isNotBlank() && currentItemId > 0L &&
                         gotItem == currentItemId.toString()
                     if (matches) {
                         content = raw
@@ -896,14 +886,18 @@ class TaskService : android.app.Service() {
             // 白耗一次任务名额，还把失败计数刷高。
             val resultItemId = itemIdFromResult(rawResponse)
             if (resultItemId.isBlank()) {
-                // 提取不到 item_id 时原来的校验会直接放行，导致「上一条任务的数据」被发出去，
-                // 后台判 item_id 不匹配。这里把情况记下来，便于定位是解密失败还是字段变了。
+                // 严格模式：解析不到 item_id 就无法确认数据归属，一律不提交。
+                // 原先是「空值放行」，会把别的商品数据传上去，后台判 item_id 不匹配。
+                consecutiveMismatch++
+                failedCount++
                 Log.w(
                     TAG,
-                    "result item id blank: task item=$currentItemId, rawLen=${rawResponse.length}, " +
-                        "prefix=${rawResponse.take(60)}"
+                    "result item id blank -> refuse: task item=$currentItemId, " +
+                        "rawLen=${rawResponse.length}, prefix=${rawResponse.take(60)}"
                 )
-                updateFloatStatus("数据里没有解析到 item_id（任务 item=$currentItemId），已记录日志")
+                updateFloatStatus("数据里没解析出 item_id（任务 item=$currentItemId），已拒绝提交，重新抓")
+                if (consecutiveMismatch >= 3) stopAutoForDataMismatch()
+                return
             }
             if (resultItemId.isNotBlank() && currentItemId > 0L &&
                 resultItemId != currentItemId.toString()
