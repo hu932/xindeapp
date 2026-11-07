@@ -1,4 +1,6 @@
-package com.app.helper.ui.compose
+﻿package com.app.helper.ui.compose
+
+import com.app.helper.R
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
@@ -31,6 +33,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
@@ -99,12 +102,13 @@ fun SplashGate(content: @Composable () -> Unit) {
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("米", color = Color.White, fontSize = 40.sp, fontWeight = FontWeight.Bold)
+                        Text("A", color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Bold)
                     }
+                    // 标题取 App 自己的名字（strings.xml: app_name = Ajie），不再写死文案
                     Text(
-                        "米乐助手",
+                        stringResource(R.string.app_name),
                         color = Color.White,
-                        fontSize = 20.sp,
+                        fontSize = 22.sp,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.alpha(alpha)
                     )
